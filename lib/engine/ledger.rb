@@ -15,11 +15,11 @@ module Engine
     Entry = Struct.new(
       :seq, :action_id, :action_type, :round, :turn, :round_num,
       :from_id, :from_type, :from_name, :to_id, :to_type, :to_name,
-      :amount, :reason,
+      :amount, :reason, :log_from, :log_to,
       keyword_init: true
     )
 
-    attr_reader :entries, :opening
+    attr_reader :opening
 
     @stack = []
 
@@ -89,10 +89,35 @@ module Engine
         # The action was rejected; its transfers are not part of the game.
         @entries.pop(@pending.size)
       else
-        describe_pending
+        # Reasons are worked out from the log only when someone looks, so a
+        # replay doesn't pay for them; remember which log lines to use.
+        log_to = @game.log.size
+        @pending.each do |e|
+          e.log_from = @log_start
+          e.log_to = log_to
+        end
+        @unresolved = true unless @pending.empty?
       end
       @action = nil
       @pending = []
+    end
+
+    # All transfers, each with its reason.
+    def entries
+      resolve_reasons!
+      @entries
+    end
+
+    # Transfers without working out reasons (for internal use during replay).
+    def raw_entries
+      @entries
+    end
+
+    def resolve_reasons!
+      return unless @unresolved
+
+      @entries.reject(&:reason).chunk_while { |a, b| a.action_id == b.action_id }.each { |group| describe(group) }
+      @unresolved = false
     end
 
     def record(from, to, amount)
@@ -131,6 +156,7 @@ module Engine
     # All entries touching one account, oldest first, each with the account's
     # running balance after it.
     def account(entity_or_key)
+      resolve_reasons!
       key = entity_or_key.is_a?(String) ? entity_or_key : key_for(entity_or_key)
       balance = @opening[key] || 0
       @entries.each_with_object([]) do |e, rows|
@@ -256,26 +282,28 @@ module Engine
       Retcon.round_label(round)
     end
 
-    # Gives each transfer from the current action a plain-words reason, taken
-    # from the game log line that mentions its amount (and ideally one of the
-    # two parties); otherwise falls back to the action type.
-    def describe_pending
-      return if @pending.empty?
-
-      lines = (@game.log[@log_start..] || []).map { |l| l.respond_to?(:message) ? l.message.to_s : l.to_s }
+    # Gives each transfer of one action a plain-words reason, taken from the
+    # game log line that mentions its amount (and ideally one of the two
+    # parties); otherwise falls back to the action type.
+    def describe(group)
+      first = group.first
+      lines = (@game.log[first.log_from...first.log_to] || []).map do |l|
+        l.respond_to?(:message) ? l.message.to_s : l.to_s
+      end
       used = {}
-      @pending.each do |e|
+      group.each do |e|
         money = @game.format_currency(e.amount)
-        candidates = lines.each_with_index.select { |l, _| l.include?(money) }
-        best = candidates.find { |l, i| !used[i] && (l.include?(e.from_name) || l.include?(e.to_name)) } ||
-               candidates.find { |l, _| l.include?(e.from_name) || l.include?(e.to_name) } ||
-               candidates.find { |_, i| !used[i] } ||
+        candidates = []
+        lines.each_with_index { |l, i| candidates << [l, i] if l.include?(money) }
+        best = candidates.find { |c| !used[c[1]] && (c[0].include?(e.from_name) || c[0].include?(e.to_name)) } ||
+               candidates.find { |c| c[0].include?(e.from_name) || c[0].include?(e.to_name) } ||
+               candidates.find { |c| !used[c[1]] } ||
                candidates.first
         if best
           used[best[1]] = true
           e.reason = best[0].sub(/\A[-•\s]+/, '')
         else
-          e.reason = @action.type.to_s.tr('_', ' ').capitalize
+          e.reason = e.action_type.to_s.tr('_', ' ').capitalize
         end
       end
     end

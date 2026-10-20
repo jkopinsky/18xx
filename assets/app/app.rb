@@ -34,6 +34,7 @@ class App < Snabberb::Component
   needs :pin, default: nil
   needs :title, default: nil
   needs :production, default: nil
+  needs :table_mode, default: false
   needs :keywords, default: nil
   needs :turnstile_sitekey, default: nil
 
@@ -154,6 +155,8 @@ class App < Snabberb::Component
   end
 
   def setup_logger
-    Engine::Logger.set_level(Lib::Params['l'], @production)
+    # Table servers log quietly like production: debug logging of every action
+    # costs about a second on a long game. Add ?l=0 to the URL to turn it on.
+    Engine::Logger.set_level(Lib::Params['l'], @production || @table_mode)
   end
 end

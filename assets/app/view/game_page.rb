@@ -225,6 +225,8 @@ module View
         },
       }
 
+      schedule_replay_warmup
+
       children = [
         menu,
         render_retcon_banner,
@@ -233,6 +235,41 @@ module View
       children.unshift(render_broken_game(@game.exception)) if @game.exception
 
       h('div#game', props, children)
+    end
+
+    # Builds the undo spare (Engine::ReplayCache) for the current game in the
+    # background, a few actions per tick, so undo doesn't replay the whole game.
+    # One timer for the page; each tick looks up whatever game is current.
+    def schedule_replay_warmup
+      %x{
+        if (!window.__replayWarmTimer) {
+          var tick = function() {
+            window.__replayWarmTimer = null;
+            var done = #{warm_tick};
+            if (!done) { window.__replayWarmTimer = setTimeout(tick, 30); }
+          };
+          window.__replayWarmTimer = setTimeout(tick, 500);
+        }
+      }
+    end
+
+    REPLAY_WARM_CHUNK = 15
+
+    # Returns true when there is nothing more to do for now.
+    def warm_tick
+      game = store['game']
+      return true if !game || store['retcon'] || game.finished || game.exception || Lib::Params['action']
+
+      checkpoint = game.round_history.last || 0
+      cache = game.replay_cache
+      if !cache || cache.checkpoint_id != checkpoint
+        game.replay_cache = Engine::ReplayCache.new(game)
+        return false
+      end
+      cache.step(REPLAY_WARM_CHUNK)
+    rescue StandardError => e
+      LOGGER.error("Undo warm-up stopped: #{e.message}")
+      true
     end
 
     def retcon_display_game

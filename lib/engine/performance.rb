@@ -32,29 +32,41 @@ module Engine
       # player id => corporation id => Position
       @positions = Hash.new { |h, k| h[k] = {} }
       @before = nil
+      @last_holdings = nil
       @action_id = 0
     end
 
     # --- recording (called by GameHooks) ---
 
+    # Nothing changes between actions, so the holdings after one action are
+    # reused as the holdings before the next; only a rejected action (whose
+    # partial effects may linger) forces a fresh look.
     def begin_action(action_id)
       @action_id = action_id
-      @before = holdings
+      @before = @last_holdings || holdings
     end
 
     def end_action(dividend_corporation: nil)
       after = holdings
-      keys = (@before.keys | after.keys)
-      keys.each do |key|
-        player_id, corp_id = key
-        old_shares, old_price = @before[key] || [0, nil]
-        new_shares, new_price = after[key] || [0, nil]
-        next if old_shares == new_shares
+      @before.each do |key, old|
+        new = after[key]
+        next if new && new[2] == old[2]
 
-        price = old_price || new_price || 0
-        apply_change(player_id, corp_id, new_shares - old_shares, price)
+        price = old[3] || new&.[](3) || 0
+        apply_change(old[0], old[1], (new ? new[2] : 0) - old[2], price)
+      end
+      after.each do |key, new|
+        next if @before.key?(key)
+
+        apply_change(new[0], new[1], new[2], new[3] || 0)
       end
       add_dividends(dividend_corporation) if dividend_corporation
+      @last_holdings = after
+      @before = nil
+    end
+
+    def discard_action
+      @last_holdings = nil
       @before = nil
     end
 
@@ -141,18 +153,20 @@ module Engine
       %w[SR ISR].include?(label) || label.to_s.include?('Stock')
     end
 
-    # [player id, corporation id] => [shares, price]
+    # "player|corporation" => [player id, corporation id, shares, price]
+    # String keys: hashing arrays is slow in the browser build.
     def holdings
       result = {}
       @game.players.each do |player|
         player.shares_by_corporation.each do |corp, shares|
           next if shares.empty? || !corp.corporation?
 
-          percent = shares.sum(&:percent)
+          percent = 0
+          shares.each { |share| percent += share.percent }
           next if percent.zero?
 
           count = percent.to_f / corp.share_percent
-          result[[player.id, corp.id]] = [count, corp.share_price&.price]
+          result["#{player.id}|#{corp.id}"] = [player.id, corp.id, count, corp.share_price&.price]
         end
       end
       result
@@ -188,7 +202,7 @@ module Engine
 
     # Money the company's dividend action moved to or from each player.
     def add_dividends(corporation_id)
-      @game.ledger.entries.reverse_each do |e|
+      @game.ledger.raw_entries.reverse_each do |e|
         break if e.action_id != @action_id
 
         if e.to_type == 'player'
@@ -229,7 +243,11 @@ module Engine
 
         @performance.begin_action(current_action_id + 1)
         result = super
-        @performance.end_action(dividend_corporation: exception ? nil : dividend_corp) unless exception
+        if exception
+          @performance.discard_action
+        else
+          @performance.end_action(dividend_corporation: dividend_corp)
+        end
         result
       end
 

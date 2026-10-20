@@ -260,6 +260,7 @@ class Api < Roda
     args = Snabberb.wrap(
       app_route: request.path,
       production: PRODUCTION,
+      table_mode: TABLE_MODE,
       turnstile_sitekey: TURNSTILE_SITEKEY,
       **needs,
     )

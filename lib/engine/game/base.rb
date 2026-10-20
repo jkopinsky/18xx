@@ -34,6 +34,7 @@ require_relative '../player_info'
 require_relative '../game_log'
 require_relative '../ledger'
 require_relative '../performance'
+require_relative '../replay_cache'
 require_relative 'meta'
 
 module Engine
@@ -1052,8 +1053,23 @@ module Engine
         @turn_start_action_id = current_action_id
       end
 
+      # A warm spare for undo/redo (see ReplayCache); set by the browser.
+      attr_accessor :replay_cache
+
       def clone(actions)
+        if @replay_cache && (game = @replay_cache.take(actions))
+          # The rebuilt game inherits the remaining spares.
+          game.replay_cache = @replay_cache
+          @replay_cache = nil
+          return game
+        end
+
         self.class.new(@names, id: @id, pin: @pin, seed: @seed, actions: actions, optional_rules: @optional_rules)
+      end
+
+      # The same game with no actions processed.
+      def blank_copy
+        self.class.new(@names, id: @id, pin: @pin, seed: @seed, actions: [], optional_rules: @optional_rules)
       end
 
       def trains

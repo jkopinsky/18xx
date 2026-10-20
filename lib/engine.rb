@@ -4,6 +4,7 @@ require_relative 'engine/debug'
 require_relative 'engine/deep_freeze'
 require_relative 'engine/jaro_winkler'
 require_relative 'engine/logger'
+require_relative 'engine/opal_speedups'
 require_relative 'engine/retcon'
 
 if RUBY_ENGINE == 'opal'
