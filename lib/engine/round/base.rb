@@ -121,7 +121,7 @@ module Engine
         raise GameError, "No step found for action #{type} at #{action.id}: #{action.to_h}" unless step
 
         step.acted = true
-        @game.note_action_step(action, step)
+        @game.note_action_step(action, step, @steps.index(step))
         step.send("process_#{action.type}", action)
 
         @at_start = false

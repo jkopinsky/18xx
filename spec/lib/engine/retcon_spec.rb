@@ -76,7 +76,9 @@ module Engine
         # without asking; replay stops at the first action that really breaks.
         expect(result.changes.count { |c| c['kind'] == 'stale_pass_dropped' }).to be > 0
         expect(result.broken_action['type']).not_to eq('pass')
-        expect(result.suggestion['choice']).to eq('skip')
+        # Outside an operating round the app can't tell whose turn is still to
+        # come, so it offers both choices rather than advising a skip.
+        expect(%w[skip either]).to include(result.suggestion['choice'])
       end
 
       it 'adds a move for a different entity before the broken action instead of replacing it' do
@@ -95,6 +97,70 @@ module Engine
         expect(session.actions[index]['entity'].to_s).to eq(current.id.to_s)
         expect(Retcon.comparable(Retcon.scrub(session.actions[index + 1])).except('auto_actions'))
           .to eq(Retcon.comparable(Retcon.scrub(broken)))
+      end
+    end
+
+    describe 'a step used twice in one turn, in 1844 160062' do
+      let(:data) { Engine.retcon_fixture('1844', '160062') }
+
+      # 1844 asks about buying a company early in a turn and again at the end.
+      # A recorded "no company" pass from the end of a turn must be matched to
+      # that last step, not the early one.
+      it 'asks instead of dropping an end-of-turn pass that now meets a train decision' do
+        session = Retcon::Session.new(data)
+        game = session.original_game
+        steps = game.action_steps
+        acts = session.actions
+        index = (0...acts.size - 1).find do |i|
+          a = acts[i]
+          b = acts[i + 1]
+          a['type'] == 'pass' && b['type'] == 'pass' && a['entity'] == b['entity'] &&
+            steps[a['id']]&.at(1)&.name.to_s.end_with?('BuyTrain') &&
+            steps[b['id']]&.at(1)&.name.to_s.end_with?('BuyCompany')
+        end
+        expect(index).not_to be_nil
+        train_pass = acts[index]
+        company_pass = acts[index + 1]
+        expect(steps[company_pass['id']][2]).to be > steps[train_pass['id']][2]
+
+        # Without the "no train" pass, the recorded "no company" pass arrives
+        # at the train decision, which comes before it in the turn.
+        result = session.delete(train_pass['id']).replay
+        expect(result.broken?).to eq(true)
+        expect(result.broken_index).to eq(index)
+        expect(result.kind).to eq(:new_decision)
+        expect(result.changes.none? { |c| c['kind'] == 'stale_pass_dropped' }).to eq(true)
+        expect(session.resolve_mode(Retcon.scrub(company_pass))).to eq(:insert)
+      end
+    end
+
+    describe 'a new decision at the end of a turn, in 1817 15528' do
+      let(:data) { Engine.retcon_fixture('1817', '15528') }
+
+      # GT withholds instead of paying out, so it has cash to pay off a loan:
+      # a decision the original game never asked about. The next recorded
+      # action is WT's, whose turn has not come yet.
+      it 'asks for the new decision instead of suggesting the later move be skipped' do
+        session = Retcon::Session.new(data)
+        dividend = session.actions.find { |a| a['id'] == 253 }
+        expect([dividend['type'], dividend['entity'], dividend['kind']]).to eq(%w[dividend GT payout])
+
+        result = session.replace(253, dividend.merge('kind' => 'withhold')).replay
+        expect(result.broken?).to eq(true)
+        expect(result.game.current_entity.id).to eq('GT')
+        expect(result.broken_action['entity']).to eq('WT')
+        expect(Retcon.turn_status(result.game, 'WT')).to eq(:upcoming)
+        expect(result.suggestion['choice']).to eq('move')
+        expect(result.suggestion['reason']).to include("Don't skip it")
+
+        gt_pass = { 'type' => 'pass', 'entity' => 'GT', 'entity_type' => 'corporation' }
+        expect(session.resolve_mode(gt_pass)).to eq(:insert)
+        recorded = session.broken_recorded_action
+        index = result.broken_index
+        session.resolve(gt_pass)
+        expect(session.actions[index]['entity']).to eq('GT')
+        expect(session.actions[index + 1].values_at('type', 'entity', 'hex', 'tile'))
+          .to eq(recorded.values_at('type', 'entity', 'hex', 'tile'))
       end
     end
 

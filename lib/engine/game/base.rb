@@ -1057,17 +1057,19 @@ module Engine
       attr_accessor :replay_cache
 
       # Which step processed each action, by action id: [round class, step
-      # class]. A pass goes to whichever step is blocking,
-      # so this is how a history fix can tell which decision a recorded pass
-      # was for.
+      # class, the step's position in the round]. A pass goes to whichever step
+      # is blocking, so this is how a history fix can tell which decision a
+      # recorded pass was for. The position matters: some rounds use the same
+      # kind of step twice (1844 asks about buying a company both early and at
+      # the end of a turn).
       def action_steps
         @action_steps ||= {}
       end
 
-      def note_action_step(action, step)
+      def note_action_step(action, step, position = nil)
         return unless action.id
 
-        action_steps[action.id] = [@round.class, step.class]
+        action_steps[action.id] = [@round.class, step.class, position]
       end
 
       def clone(actions)

@@ -122,6 +122,8 @@ module View
 
       return h('div.padded', 'Loading game...') unless @game
 
+      restore_master_mode_after_reload unless @retcon
+
       LOGGER.debug do
         @_logger ||= {}
         @_logger[:render] = Time.now
@@ -273,6 +275,28 @@ module View
     rescue StandardError => e
       LOGGER.error("Undo warm-up stopped: #{e.message}")
       true
+    end
+
+    # A fix turns master mode on for this device and puts it back when it
+    # ends. If the page was reloaded in the middle of a fix, the fix is gone
+    # but master mode would stay on; put it back the first time the game
+    # page shows the game. (Hotseat games ignore master mode.)
+    def self.master_mode_checked
+      @master_mode_checked ||= {}
+    end
+
+    def restore_master_mode_after_reload
+      checked = GamePage.master_mode_checked
+      return if checked[@game.id] || @game_data[:mode] == :hotseat
+
+      checked[@game.id] = true
+      storage = Lib::Storage[@game.id]
+      key = Game::FixHistory::PREVIOUS_MASTER_MODE
+      return if !storage || !storage.key?(key)
+
+      restored = storage.dup
+      restored['master_mode'] = restored.delete(key)
+      Lib::Storage[@game.id] = restored
     end
 
     def retcon_display_game

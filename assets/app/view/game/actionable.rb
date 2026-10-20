@@ -68,7 +68,13 @@ module View
       end
 
       def process_action(action)
-        if (retcon = store['retcon']) && retcon.awaiting_move?
+        if (retcon = store['retcon'])
+          # While history is being fixed the page shows a draft game, so
+          # nothing may reach the live game from here: only real moves, and
+          # only when the fix is waiting for one.
+          refusal = retcon_refusal(action, retcon)
+          return store(:flash_opts, refusal) if refusal
+
           return process_retcon_action(retcon, action)
         end
 
@@ -186,6 +192,20 @@ module View
       rescue StandardError => e
         LOGGER.error(e)
         store(:flash_opts, "That move could not be used: #{e.message}")
+      end
+
+      # Why an action can't be used while history is being fixed, or nil.
+      def retcon_refusal(action, retcon)
+        type = action.type.to_s
+        if type == 'message'
+          'Chat and ledger checkpoints are paused while history is being fixed. Commit or cancel the fix first.'
+        elsif %w[undo redo].include?(type)
+          'While fixing history, u (or "Undo last fix step" on the Fix history tab) takes back the last step of the fix.'
+        elsif type.start_with?('program_')
+          'Auto settings are paused while history is being fixed.'
+        elsif !retcon.awaiting_move?
+          'This is a preview of the fixed history. Commit or cancel the fix on the Fix history tab before making moves.'
+        end
       end
 
       def clear_ui_state

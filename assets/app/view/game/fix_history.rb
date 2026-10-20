@@ -81,10 +81,16 @@ module View
         ])
       end
 
+      # Remembers this device's master mode while a fix is open. It is kept in
+      # storage, not just in memory, so a reload in the middle of a fix can put
+      # it back (see GamePage#restore_master_mode_after_reload).
+      PREVIOUS_MASTER_MODE = 'retcon_previous_master_mode'
+
       def begin_retcon(state)
         @game_storage = Lib::Storage[@game.id] || {}
-        state.instance_variable_set(:@previous_master_mode, @game_storage['master_mode'])
-        Lib::Storage[@game.id] = @game_storage.merge('master_mode' => true)
+        previous = @game_storage.key?(PREVIOUS_MASTER_MODE) ? @game_storage[PREVIOUS_MASTER_MODE] : @game_storage['master_mode']
+        state.instance_variable_set(:@previous_master_mode, previous)
+        Lib::Storage[@game.id] = @game_storage.merge('master_mode' => true, PREVIOUS_MASTER_MODE => previous || false)
         yield
         store(:retcon, state, skip: true)
         if state.awaiting_move?
@@ -109,7 +115,10 @@ module View
         if broken
           lines << h('p', { style: { fontWeight: 'bold' } }, "This action no longer works: #{@retcon.message}")
           lines << h(:p, "It is now #{expected['entity']}'s turn. They may: #{expected['actions'].join(', ')}.") if expected
-          lines << h(:p, "Suggestion: skip it. #{suggestion['reason']}") if suggestion
+          if suggestion
+            lead = { 'skip' => 'Suggestion: skip it. ', 'move' => "Suggestion: move for #{expected&.dig('entity')} first. " }
+            lines << h(:p, "#{lead[suggestion['choice']]}#{suggestion['reason']}")
+          end
         else
           lines << h(:p, @retcon.message)
         end
@@ -186,7 +195,11 @@ module View
           payload = { actions: actions, base_action_count: @retcon.base_action_count }
           @connection.post(GameManager.url(@game_data, '/retcon'), payload) do |data|
             if (error = data['error'])
-              store(:flash_opts, "Not committed: #{error}")
+              # Nothing changed on the server. The fix can't be committed as it
+              # stands (most often someone moved meanwhile), so drop it and
+              # catch up with the live game.
+              finish(@game_data, "Not committed: #{error} The fix was discarded; the game is up to date again.")
+              catch_up
             else
               finish(data, 'History corrected for everyone.')
             end
@@ -196,6 +209,24 @@ module View
 
       def cancel
         finish(@game_data, 'Fix cancelled; nothing changed.')
+        catch_up
+      end
+
+      # Live updates are ignored while a fix is open, so fetch the game again
+      # in case others moved meanwhile. Hotseat games have no server.
+      def catch_up
+        return if hotseat? || !@connection
+
+        connection = @connection
+        game_data = @game_data
+        user = @user
+        connection.get(GameManager.url(game_data)) do |data|
+          next if data['error'] || store['retcon']
+          next if (data['actions'] || []).size == (store['game_data']['actions'] || []).size
+
+          store(:game_data, data, skip: true)
+          store(:game, Engine::Game.load(data, user: user&.dig('id')))
+        end
       end
 
       private
@@ -212,7 +243,8 @@ module View
       end
 
       def restore_master_mode
-        storage = Lib::Storage[@game.id] || {}
+        storage = (Lib::Storage[@game.id] || {}).dup
+        storage.delete(PREVIOUS_MASTER_MODE)
         Lib::Storage[@game.id] = storage.merge('master_mode' => @retcon.instance_variable_get(:@previous_master_mode))
       end
 

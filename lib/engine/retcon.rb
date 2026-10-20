@@ -39,6 +39,25 @@ module Engine
       klass.name.to_s.split('::').last.gsub(/([a-z])([A-Z])/, '\\1 \\2')
     end
 
+    # Where an entity stands in the current operating round's order:
+    #   :over     - it has already operated this round
+    #   :upcoming - it operates later this round
+    #   :current  - it is operating now
+    #   :unknown  - not an operating round, or not one of its operators
+    def turn_status(game, entity_id)
+      round = game.round
+      return :unknown if !round.respond_to?(:operating?) || !round.operating?
+
+      entities = round.entities
+      index = entities.index { |e| e.id.to_s == entity_id.to_s }
+      return :unknown unless index
+
+      current = round.entity_index
+      return :current if index == current
+
+      index < current ? :over : :upcoming
+    end
+
     def deep_dup(obj)
       case obj
       when Hash
@@ -222,23 +241,55 @@ module Engine
         return nil unless current
         return same_entity_suggestion(current) if current.id.to_s == @broken_action['entity'].to_s
 
-        if @broken_action['type'] == 'pass'
-          return {
-            'choice' => 'skip',
-            'reason' => "It is #{current.name}'s turn, not #{actor_name}'s, " \
-                        'and a pass changes no money or holdings.',
+        case Retcon.turn_status(@game, @broken_action['entity'])
+        when :upcoming
+          # The company now operating has a decision the original game did not
+          # have (cash for a loan payoff, a train it can now afford), and no
+          # recorded action answers it. The recorded action belongs to a later
+          # turn: skipping it would throw away a move that is still to come.
+          {
+            'choice' => 'move',
+            'reason' => "It is still #{current.name}'s turn, and #{actor_name}'s turn comes later. " \
+                        "#{current.name} has a decision here#{step_note} that it did not have in the original " \
+                        "game. Make it, and #{actor_name}'s recorded #{action_words} is tried again " \
+                        "afterwards. Don't skip it.",
+          }
+        when :over
+          if @broken_action['type'] == 'pass'
+            {
+              'choice' => 'skip',
+              'reason' => "It is #{current.name}'s turn, not #{actor_name}'s, " \
+                          'and a pass changes no money or holdings.',
+            }
+          else
+            # The change ended this entity's turn before the recorded action: it
+            # can no longer happen at all. Skipping is usually right, but it did
+            # move money or shares, so the table should check the preview.
+            {
+              'choice' => 'skip',
+              'reason' => "#{actor_name}'s turn is already over (it is #{current.name}'s turn now), " \
+                          "so this #{action_words} can no longer happen. Skip it, then check the " \
+                          'preview, since it moved money or shares in the original game.',
+            }
+          end
+        else
+          {
+            'choice' => 'either',
+            'reason' => "It is #{current.name}'s turn now, not #{actor_name}'s. If #{current.name} has a " \
+                        "decision here#{step_note} that the original game did not have, make it first; this " \
+                        "action is tried again afterwards. If #{actor_name} really can no longer " \
+                        "#{action_words}, skip it and check the preview.",
           }
         end
+      end
 
-        # The change ended this entity's turn before the recorded action: it
-        # can no longer happen at all. Skipping is usually right, but it did
-        # move money or shares, so the table should check the preview.
-        {
-          'choice' => 'skip',
-          'reason' => "#{actor_name}'s turn is already over (it is #{current.name}'s turn now), " \
-                      "so this #{action_words} can no longer happen. Skip it, then check the " \
-                      'preview, since it moved money or shares in the original game.',
-        }
+      def step_note
+        step = begin
+          @game.round.active_step&.description
+        rescue StandardError
+          nil
+        end
+        step ? " (\"#{step}\")" : ''
       end
 
       # The entity is still acting but has moved past the step where the
@@ -613,7 +664,12 @@ module Engine
         return false unless attempt['type'] == 'pass'
 
         active = game.round.active_entities.map { |e| e.id.to_s }
-        !active.empty? && !active.include?(attempt['entity'].to_s)
+        return false if active.empty? || active.include?(attempt['entity'].to_s)
+
+        # In an operating round, only once its turn is over: a pass by a
+        # company whose turn is still to come is a real decision, kept for
+        # when its turn arrives.
+        Retcon.turn_status(game, attempt['entity']) != :upcoming
       end
 
       def drop_pass(game, index, attempt, reason)
@@ -662,11 +718,14 @@ module Engine
         return nil if round.class != tag[0] # a different round: let the rules decide
 
         target = pass_target(round, entity)
-        return nil if !target || target.instance_of?(tag[1])
+        return nil unless target
 
         steps = round.steps
-        was = steps.index { |s| s.instance_of?(tag[1]) }
         now = steps.index(target)
+        was = tag[2] if tag[2] && steps[tag[2]].instance_of?(tag[1])
+        was ||= steps.index { |s| s.instance_of?(tag[1]) }
+        return nil if was == now
+
         if was && now && was < now
           @pass_drop_reason = "the #{describe_step(steps[was])} decision it answered had already been settled"
           return :drop

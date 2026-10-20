@@ -77,9 +77,15 @@ module Engine
 
     # Returns a game for this full action list, using a spare if the list's
     # prefix still matches; nil if no spare can be used. The spare is consumed.
+    #
+    # The prefix must match action for action, not just by id: a committed
+    # history fix keeps the same ids while changing what earlier actions say.
     def take(actions)
       return nil unless ready?
-      return nil unless actions.take_while { |a| a['id'] <= @checkpoint_id }.size == @raw.size
+
+      prefix = actions.take_while { |a| a['id'] <= @checkpoint_id }
+      return nil unless prefix.size == @raw.size
+      return nil unless same_actions?(prefix)
 
       filtered, = Game::Base.filtered_actions(actions)
       prefix_ids = filtered.compact.map { |a| a['id'] }.select { |id| id <= @checkpoint_id }
@@ -88,6 +94,15 @@ module Engine
       spare = @ready.shift
       spare.send(:initialize_actions, actions)
       spare.exception ? nil : spare
+    end
+
+    private
+
+    def same_actions?(prefix)
+      prefix.each_with_index do |action, i|
+        return false unless action == @raw[i]
+      end
+      true
     end
   end
 end

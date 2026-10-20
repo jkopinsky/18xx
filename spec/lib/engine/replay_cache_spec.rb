@@ -97,6 +97,39 @@ module Engine
           expect(Engine.state_of(undone)).to eq(Engine.state_of(slow))
         end
 
+        # 1817 only: in the 1844 fixture none of the last dividends before the
+        # checkpoint can be changed and still replay cleanly to the same length.
+        it 'is not used when an earlier action changed but the ids did not (a committed history fix)',
+           if: title == '1817' do
+          cache = ReplayCache.new(game)
+          cache.build!
+          game.replay_cache = cache
+
+          # A fixed history as a retcon commits it: one earlier dividend
+          # changed, every id the same, and it replays cleanly.
+          edited = nil
+          candidates = data['actions'].select { |a| a['type'] == 'dividend' && a['id'] < cache.checkpoint_id }
+          candidates.last(8).reverse_each do |a|
+            session = Retcon::Session.new(data, original_game: game)
+            flat = session.actions.find { |x| x['id'] == a['id'] }
+            next unless flat
+
+            other = flat['kind'] == 'payout' ? 'withhold' : 'payout'
+            result = session.replace(flat['id'], flat.merge('kind' => other)).replay
+            next if !result.clean? || session.actions.size != game.raw_actions.size
+            next if Engine.state_of(result.game)[:players] == Engine.state_of(game)[:players]
+
+            edited = session.actions
+            break
+          end
+          expect(edited).not_to be_nil
+          expect(edited.map { |a| a['id'] }).to eq(game.raw_actions.map { |a| a['id'] })
+
+          fast = game.clone(edited)
+          slow = Game.load(data, actions: edited)
+          expect(Engine.state_of(fast)).to eq(Engine.state_of(slow))
+        end
+
         it 'is not used before it is ready' do
           cache = ReplayCache.new(game)
           cache.step(5)
