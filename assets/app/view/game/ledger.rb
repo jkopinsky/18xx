@@ -10,9 +10,12 @@ module View
     class Ledger < Form
       include Actionable
 
-      needs :game
       needs :ledger_account, default: nil, store: true
       needs :ledger_check, default: nil, store: true
+
+      # A checkpoint is a chat message, so every device sees it and it survives
+      # a history fix.
+      CHECKPOINT_TEXT = '✓ Ledger checkpoint: all piles at the table match the app.'
 
       KIND_TEXT = {
         missed: 'An action of exactly this amount (paid or received once too few or too many times)',
@@ -32,6 +35,7 @@ module View
           render_audit(ledger),
           render_account_picker(accounts, key),
           render_count_check(ledger, key),
+          render_checkpoint,
           render_rows(ledger, key),
         ].compact)
       end
@@ -108,13 +112,33 @@ module View
         ].compact)
       end
 
+      def last_checkpoint_id
+        @game.raw_actions.reverse_each do |a|
+          return a['id'] if a['type'] == 'message' && a['message'].to_s.start_with?(CHECKPOINT_TEXT)
+        end
+        nil
+      end
+
+      def render_checkpoint
+        last = last_checkpoint_id
+        note = last ? "Last checkpoint: after action #{last}. Checks only look at actions since then." : 'No checkpoint yet.'
+        mark = lambda do
+          sender = @game.player_by_id(@user&.dig('id')) || @game.players.first
+          process_action(Engine::Action::Message.new(sender, message: CHECKPOINT_TEXT))
+        end
+        h(:div, { style: { margin: '0 0 1rem 0' } }, [
+          h(:span, "#{note} "),
+          h(:button, { on: { click: mark } }, 'Mark all piles as checked'),
+        ])
+      end
+
       def check(ledger, key)
         counted = params['ledger_counted'].to_s.strip
         return if counted.empty?
 
         # skip: is passed explicitly: in the browser build a trailing Hash
         # argument would otherwise be taken as keyword options, storing nil.
-        store(:ledger_check, ledger.explain_difference(key, counted.to_i), skip: false)
+        store(:ledger_check, ledger.explain_difference(key, counted.to_i, since_action: last_checkpoint_id), skip: false)
       end
 
       def render_check_result(result)
@@ -134,7 +158,7 @@ module View
             ])
           end
         end
-        lines = [h(:li, 'No single action explains it; read the lines below from the last checkpoint.')] if lines.empty?
+        lines = [h(:li, 'No single action explains it; read the lines below back to the last checkpoint.')] if lines.empty?
 
         h('div.padded', { style: { border: '1px solid currentColor' } }, [
           h(:div, "The table has #{fmt(result[:difference].abs)} #{direction} than the app. Likely causes, most recent first:"),

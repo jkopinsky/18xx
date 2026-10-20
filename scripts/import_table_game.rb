@@ -77,6 +77,7 @@ end
 settings = data['settings'] || {}
 settings['seed'] ||= data['id'].to_s.scan(/\d+/).first.to_i if data['id']
 settings['player_order'] = users.map(&:id)
+settings['auto_routing'] = true unless settings.key?('auto_routing')
 
 DB.transaction do
   game = Game.create(
