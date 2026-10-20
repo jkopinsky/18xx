@@ -27,7 +27,7 @@ module Engine
     def deep_dup(obj)
       case obj
       when Hash
-        obj.each_with_object({}) { |(k, v), h| h[k] = deep_dup(v) }
+        obj.transform_values { |v| deep_dup(v) }
       when Array
         obj.map { |v| deep_dup(v) }
       else
@@ -99,7 +99,7 @@ module Engine
     end
 
     def route_revenues(action)
-      return nil unless action && action['routes'].is_a?(Array)
+      return nil if !action || !action['routes'].is_a?(Array)
 
       revenues = action['routes'].map { |r| r['revenue'] }
       revenues.all? ? revenues : nil
@@ -120,8 +120,12 @@ module Engine
           pct = p.percent_of(c)
           h[c.name] = pct if pct && !pct.zero?
         end
-        [p.name, { 'cash' => p.cash, 'value' => game.player_value(p), 'shares' => shares,
-                   'companies' => p.companies.map(&:sym).sort }]
+        [p.name, {
+          'cash' => p.cash,
+          'value' => game.player_value(p),
+          'shares' => shares,
+          'companies' => p.companies.map(&:sym).sort,
+        }]
       end
       corporations = game.corporations.select(&:ipoed).to_h do |c|
         info = {
@@ -187,12 +191,15 @@ module Engine
       # whose turn it no longer is has no effect on money or holdings, so
       # skipping it is usually right.
       def suggestion
-        return nil unless broken? && @broken_action
+        return nil if !broken? || !@broken_action
 
         current = @game.current_entity
         if @broken_action['type'] == 'pass' && current && current.id.to_s != @broken_action['entity'].to_s
-          return { 'choice' => 'skip', 'reason' => "It is #{current.name}'s turn, not #{actor_name}'s, " \
-                                                 'and a pass changes no money or holdings.' }
+          return {
+            'choice' => 'skip',
+            'reason' => "It is #{current.name}'s turn, not #{actor_name}'s, " \
+                        'and a pass changes no money or holdings.',
+          }
         end
 
         nil
@@ -371,7 +378,7 @@ module Engine
       # renumber that train in every later action. Returns true when the
       # repaired action was processed.
       def repair_train_purchase(game, attempt)
-        return false unless attempt['type'] == 'buy_train' && attempt['train']
+        return false if attempt['type'] != 'buy_train' || !attempt['train']
 
         old_id = attempt['train']
         name = original_game.train_by_id(old_id)&.name || old_id.to_s.rpartition('-').first
@@ -386,9 +393,14 @@ module Engine
         end
 
         @train_remap[old_id] = candidate.id
-        @changes << { 'index' => game.raw_actions.size - 1, 'id' => game.raw_actions.last['id'],
-                      'type' => 'buy_train', 'kind' => 'train_renumbered',
-                      'before' => old_id, 'after' => candidate.id }
+        @changes << {
+          'index' => game.raw_actions.size - 1,
+          'id' => game.raw_actions.last['id'],
+          'type' => 'buy_train',
+          'kind' => 'train_renumbered',
+          'before' => old_id,
+          'after' => candidate.id,
+        }
         true
       end
 
@@ -398,16 +410,28 @@ module Engine
         before_auto = Retcon.comparable(stored['auto_actions'])
         after_auto = Retcon.comparable(replayed['auto_actions'])
         if stored.key?('auto_actions') && before_auto != after_auto
-          @changes << { 'index' => index, 'id' => replayed['id'], 'type' => replayed['type'],
-                        'kind' => 'auto_actions', 'before' => before_auto, 'after' => after_auto }
+          @changes << {
+            'index' => index,
+            'id' => replayed['id'],
+            'type' => replayed['type'],
+            'kind' => 'auto_actions',
+            'before' => before_auto,
+            'after' => after_auto,
+          }
         end
 
         before_rev = Retcon.route_revenues(stored)
         after_rev = Retcon.route_revenues(replayed)
         return if !before_rev || before_rev == after_rev
 
-        @changes << { 'index' => index, 'id' => replayed['id'], 'type' => replayed['type'],
-                      'kind' => 'route_revenue', 'before' => before_rev, 'after' => after_rev }
+        @changes << {
+          'index' => index,
+          'id' => replayed['id'],
+          'type' => replayed['type'],
+          'kind' => 'route_revenue',
+          'before' => before_rev,
+          'after' => after_rev,
+        }
       end
     end
   end

@@ -83,8 +83,12 @@ module Engine
 
         it 'replays the whole game with recomputed results to the same end state' do
           session = Retcon::Session.new(data)
-          session.insert_after(0, { 'type' => 'message', 'entity' => data['players'].first['id'],
-                                    'entity_type' => 'player', 'message' => 'retcon test' })
+          session.insert_after(0, {
+                                 'type' => 'message',
+                                 'entity' => data['players'].first['id'],
+                                 'entity_type' => 'player',
+                                 'message' => 'retcon test',
+                               })
           result = session.replay
           expect(result.clean?).to eq(true)
           expect(session.preview(result)).to eq([])
@@ -121,7 +125,7 @@ module Engine
           expect(result.broken_index >= target['id'] - 1).to eq(true)
           expect(result.game.exception).to eq(nil)
           skipped = session.skip
-          expect([:clean, :broken].include?(skipped.status)).to eq(true)
+          expect(%i[clean broken].include?(skipped.status)).to eq(true)
         end
       end
     end
