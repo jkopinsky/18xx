@@ -134,6 +134,10 @@ module View
           h(Game::GameInfo, game: @game)
         when 'spreadsheet'
           h(Game::Spreadsheet, game: @game)
+        when 'ledger'
+          h(Game::Ledger, game: @game)
+        when 'holdings'
+          h(Game::Holdings, game: @game)
         when 'tools'
           h(Game::Tools, game: @game, game_data: @game_data, user: @user)
         when 'auto'
@@ -274,6 +278,10 @@ module View
           change_anchor('#tiles')
         when 's'
           change_anchor('#spreadsheet')
+        when 'l'
+          change_anchor('#ledger')
+        when 'h'
+          change_anchor('#holdings')
         when 'o'
           change_anchor('#tools')
         when 'a'
@@ -366,6 +374,8 @@ module View
       menu_items << item('I|nfo', '#info')
       menu_items << item('T|iles', '#tiles') unless @game.layout == :none
       menu_items << item('S|preadsheet', '#spreadsheet')
+      menu_items << item('L|edger', '#ledger')
+      menu_items << item('H|oldings', '#holdings')
       menu_items << item("To|ols#{' 📝' if note}", '#tools')
 
       enabled = !@game.programmed_actions[@game.player_by_id(@user['id'])].empty? if @user
