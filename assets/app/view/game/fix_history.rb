@@ -143,7 +143,8 @@ module View
             case c['kind']
             when 'route_revenue' then "Action #{c['id']}: route revenue changes from #{show(c['before'])} to #{show(c['after'])}"
             when 'train_renumbered' then "Action #{c['id']}: buys train #{c['after']} instead of #{c['before']}"
-            when 'stale_pass_dropped' then "#{c['before']}'s recorded pass was dropped: its turn had already ended"
+            when 'stale_pass_dropped'
+              "#{c['before']}'s recorded pass was dropped: #{c['reason'] || 'its turn had already ended'}"
             else "Action #{c['id']} (#{c['type']}): different automatic follow-up actions"
             end
           h(:li, text)

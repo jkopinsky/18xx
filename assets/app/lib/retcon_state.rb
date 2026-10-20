@@ -101,12 +101,16 @@ module Lib
       game = @result.game
       actor = game.get(broken['entity_type'], broken['entity'])&.name || broken['entity'].to_s
       what = broken['type'].to_s.tr('_', ' ')
-      current = game.current_entity&.name
-      if current && current != actor
-        "It is #{current}'s turn: your next move is added before the recorded \"#{actor}: #{what}\" " \
-          "(action #{broken['id']}), which is tried again afterwards."
-      else
+      current = game.current_entity
+      return nil unless current
+
+      type = current.player? ? 'player' : current.class.name.split('::').last.downcase
+      move = { 'entity' => current.id, 'entity_type' => type }
+      if @session.resolve_mode(move) == :replace
         "Your next move for #{actor} replaces the recorded \"#{what}\" (action #{broken['id']})."
+      else
+        "Your next move for #{current.name} is added before the recorded \"#{actor}: #{what}\" " \
+          "(action #{broken['id']}), which is tried again afterwards."
       end
     end
 

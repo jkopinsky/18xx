@@ -20,9 +20,24 @@ module Engine
   # dropped so that routes are re-validated against the new map.
   module Retcon
     ROUTE_DERIVED_KEYS = %w[revenue revenue_str hexes nodes subsidy].freeze
+    # Session-only note on each recorded action: which round and step
+    # processed it in the original game. Never stored or sent anywhere.
+    STEP_TAG = '_retcon_step'
+
     COMPARE_IGNORED_KEYS = %w[id created_at].freeze
 
     module_function
+
+    def untag(action)
+      return action unless action.key?(STEP_TAG)
+
+      action.reject { |k, _| k == STEP_TAG }
+    end
+
+    # "Engine::Game::G1817::Step::Track" => "Track"
+    def step_name(klass)
+      klass.name.to_s.split('::').last.gsub(/([a-z])([A-Z])/, '\\1 \\2')
+    end
 
     def deep_dup(obj)
       case obj
@@ -64,6 +79,7 @@ module Engine
     def scrub(action)
       h = deep_dup(action)
       h.delete('auto_actions')
+      h.delete(STEP_TAG)
       if h['routes'].is_a?(Array)
         h['routes'] = h['routes'].map do |route|
           route.reject { |k, _| ROUTE_DERIVED_KEYS.include?(k) }
@@ -166,9 +182,10 @@ module Engine
     end
 
     class Result
-      attr_reader :status, :game, :broken_index, :broken_action, :error, :changes
+      attr_reader :status, :game, :broken_index, :broken_action, :error, :changes, :kind
 
-      def initialize(status:, game:, broken_index: nil, broken_action: nil, error: nil, changes: [])
+      def initialize(status:, game:, broken_index: nil, broken_action: nil, error: nil, changes: [], kind: nil)
+        @kind = kind
         @status = status
         @game = game
         @broken_index = broken_index
@@ -202,7 +219,8 @@ module Engine
         return nil if !broken? || !@broken_action
 
         current = @game.current_entity
-        return nil if !current || current.id.to_s == @broken_action['entity'].to_s
+        return nil unless current
+        return same_entity_suggestion(current) if current.id.to_s == @broken_action['entity'].to_s
 
         if @broken_action['type'] == 'pass'
           return {
@@ -220,6 +238,27 @@ module Engine
           'reason' => "#{actor_name}'s turn is already over (it is #{current.name}'s turn now), " \
                       "so this #{action_words} can no longer happen. Skip it, then check the " \
                       'preview, since it moved money or shares in the original game.',
+        }
+      end
+
+      # The entity is still acting but has moved past the step where the
+      # recorded action belonged (the route step was skipped because there is
+      # no route now, say).
+      def same_entity_suggestion(current)
+        return nil if @kind == :new_decision
+        return nil if @game.round.actions_for(current).include?(@broken_action['type'])
+
+        step = begin
+          @game.round.active_step&.description
+        rescue StandardError
+          nil
+        end
+        at = step ? " (the game is at \"#{step}\")" : ''
+        {
+          'choice' => 'skip',
+          'reason' => "#{actor_name} is past the point in its turn where it could #{action_words}#{at}, " \
+                      'so this recorded action can no longer happen. Skip it, then check the preview, ' \
+                      'since it may have moved money or shares in the original game.',
         }
       end
 
@@ -265,7 +304,7 @@ module Engine
     end
 
     class Session
-      attr_reader :original_actions, :actions, :dirty_from, :changes, :source_ids, :slot
+      attr_reader :original_actions, :dirty_from, :changes, :source_ids, :slot
 
       # data: the game as a Hash, as found in a game's JSON export.
       # original_game: the game already loaded from that data, if the caller
@@ -280,6 +319,29 @@ module Engine
         @slot = nil
         @changes = []
         @train_remap = {}
+        @broken_kind = nil
+        @broken_game = nil
+        @tagged = false
+      end
+
+      # The action list to commit.
+      def actions
+        @actions.map { |a| Retcon.untag(a) }
+      end
+
+      # Notes on each recorded action which step processed it in the original
+      # game, before anything is edited. A pass goes to whichever step is
+      # blocking, so after an edit a recorded pass could otherwise land on a
+      # different decision than the one the table made.
+      def tag_steps!
+        return if @tagged
+
+        @tagged = true
+        steps = original_game.action_steps
+        @actions.each_with_index do |a, i|
+          id = @original_ids_flat ? i + 1 : @source_ids[i]
+          a[STEP_TAG] = steps[id] if steps[id]
+        end
       end
 
       # Opens a place in history where a new move is needed: :replace removes
@@ -287,6 +349,7 @@ module Engine
       # a move just before it. Returns the game as it stood at that point, for
       # the table to make the move on.
       def open_slot(id, mode)
+        tag_steps!
         idx = index_of(id)
         @actions.delete_at(idx) if mode == :replace
         Retcon.renumber!(@actions)
@@ -315,11 +378,14 @@ module Engine
       end
 
       def load(actions)
-        Engine::Game.load(@data, actions: actions)
+        Engine::Game.load(@data, actions: actions.map { |a| Retcon.untag(a) })
       end
 
       def original_game
-        @original_game ||= load(@original_actions)
+        return @original_game if @original_game
+
+        @original_ids_flat = true
+        @original_game = load(@original_actions)
       end
 
       def index_of(id)
@@ -330,6 +396,7 @@ module Engine
       end
 
       def replace(id, action)
+        tag_steps!
         idx = index_of(id)
         @actions[idx] = Retcon.deep_dup(action)
         mark_dirty(idx)
@@ -337,6 +404,7 @@ module Engine
       end
 
       def delete(id)
+        tag_steps!
         idx = index_of(id)
         @actions.delete_at(idx)
         mark_dirty(idx)
@@ -345,6 +413,7 @@ module Engine
 
       # Inserts an action after the given id (0 = at the very start).
       def insert_after(id, action)
+        tag_steps!
         idx = id.zero? ? 0 : index_of(id) + 1
         @actions.insert(idx, Retcon.deep_dup(action))
         mark_dirty(idx)
@@ -385,13 +454,32 @@ module Engine
       end
 
       # :replace or :insert, for a move offered at the broken point.
+      #
+      # A move entered during the fix that was refused is always replaced.
+      # Otherwise the move replaces the recorded action only when it is the same
+      # decision: same entity, and the recorded action's kind of move is still
+      # on offer but was refused (it can no longer afford the train, say).
+      # When the game now stops at a different decision first (a new token
+      # placement, a loan step reached early), the move is added before the
+      # recorded action, which is tried again afterwards.
       def resolve_mode(action)
         broken = @broken_index && @actions[@broken_index]
         return :insert unless broken
 
+        # A move entered during this fix that the rules refused: the next
+        # move is its correction.
+        return :replace unless broken[STEP_TAG]
+
         same = broken['entity'].to_s == action['entity'].to_s &&
                broken['entity_type'].to_s == action['entity_type'].to_s
-        same ? :replace : :insert
+        return :insert unless same
+        return :insert if @broken_kind == :new_decision
+
+        game = @broken_game
+        entity = game&.get(broken['entity_type'], broken['entity'])
+        return :replace unless entity
+
+        game.round.actions_for(entity).include?(broken['type']) ? :replace : :insert
       end
 
       # The recorded action that stopped the replay, if any.
@@ -405,6 +493,8 @@ module Engine
           actions: Retcon.deep_dup(@actions),
           dirty_from: @dirty_from,
           broken_index: @broken_index,
+          broken_kind: @broken_kind,
+          broken_game: @broken_game,
           slot: @slot,
           changes: Retcon.deep_dup(@changes),
           train_remap: @train_remap.dup,
@@ -415,6 +505,8 @@ module Engine
         @actions = Retcon.deep_dup(snap[:actions])
         @dirty_from = snap[:dirty_from]
         @broken_index = snap[:broken_index]
+        @broken_kind = snap[:broken_kind]
+        @broken_game = snap[:broken_game]
         @slot = snap[:slot]
         @changes = Retcon.deep_dup(snap[:changes])
         @train_remap = snap[:train_remap].dup
@@ -443,6 +535,7 @@ module Engine
         Retcon.renumber!(@actions)
         @dirty_from = [@dirty_from || idx, idx].min
         @broken_index = nil
+        @broken_kind = nil
       end
 
       def continue_from(game, start)
@@ -451,6 +544,23 @@ module Engine
         while i < @actions.size
           stored = @actions[i]
           attempt = Retcon.remap_trains(Retcon.scrub(stored), @train_remap)
+
+          case (verdict = check_recorded_pass(game, stored))
+          when :drop
+            @actions[start...i] = done
+            done = []
+            start = i
+            drop_pass(game, i, attempt, @pass_drop_reason)
+            next
+          when GameError
+            @actions[start...i] = done
+            @broken_index = i
+            @broken_kind = :new_decision
+            @broken_game = game
+            return Result.new(status: :broken, game: game, broken_index: i, kind: :new_decision,
+                              broken_action: attempt, error: verdict, changes: @changes)
+          end
+
           game.process_action(attempt, add_auto_actions: true)
 
           if game.exception
@@ -466,7 +576,7 @@ module Engine
             game = load(@actions[0...i])
 
             if stale_pass?(game, attempt)
-              drop_stale_pass(game, i, attempt)
+              drop_pass(game, i, attempt, 'its turn had already ended')
               next
             end
 
@@ -474,19 +584,24 @@ module Engine
             unless repaired
               game = load(@actions[0...i]) if game.exception
               @broken_index = i
-              return Result.new(status: :broken, game: game, broken_index: i,
+              @broken_kind = :rejected
+              @broken_game = game
+              return Result.new(status: :broken, game: game, broken_index: i, kind: :rejected,
                                 broken_action: attempt, error: error, changes: @changes)
             end
           end
 
           replayed = Retcon.deep_dup(game.raw_actions.last)
+          replayed[STEP_TAG] = stored[STEP_TAG] if stored[STEP_TAG]
           done << replayed
           note_change(i, stored, replayed)
           i += 1
         end
 
         @broken_index = nil
-        @actions = game.raw_actions.map { |a| Retcon.deep_dup(a) }
+        @broken_kind = nil
+        @broken_game = nil
+        @actions[start, @actions.size - start] = done
         Result.new(status: :clean, game: game, changes: @changes)
       end
 
@@ -501,7 +616,7 @@ module Engine
         !active.empty? && !active.include?(attempt['entity'].to_s)
       end
 
-      def drop_stale_pass(game, index, attempt)
+      def drop_pass(game, index, attempt, reason)
         entity = game.get(attempt['entity_type'], attempt['entity'])
         @actions.delete_at(index)
         Retcon.renumber!(@actions)
@@ -512,7 +627,61 @@ module Engine
           'kind' => 'stale_pass_dropped',
           'before' => entity&.name || attempt['entity'].to_s,
           'after' => nil,
+          'reason' => reason,
         }
+      end
+
+      # The step a pass by this entity would go to now: the same search the
+      # round itself makes.
+      def pass_target(round, entity)
+        round.steps.each do |step|
+          next unless step.active?
+          return step if step.actions(entity).include?('pass')
+          return nil if step.blocking?
+        end
+        nil
+      end
+
+      # A recorded pass answers one particular decision (no second tile lay,
+      # no token, no train). After an edit the game can reach that pass at a
+      # different decision. Returns:
+      #   :drop     - the decision it answered was already settled or never
+      #               came up this time (no token was possible after the new
+      #               tile lay, say), so the pass has nothing to do
+      #   GameError - a decision the original game did not have here comes up
+      #               first (a token is now possible, say); the table is asked
+      #   nil       - same decision as before, or nothing to check
+      def check_recorded_pass(game, stored)
+        tag = stored[STEP_TAG]
+        return nil if stored['type'] != 'pass' || !tag
+
+        round = game.round
+        entity = game.get(stored['entity_type'], stored['entity'])
+        return nil unless entity
+        return nil unless round.active_entities.include?(entity) # turn over: handled as a stale pass
+        return nil if round.class != tag[0] # a different round: let the rules decide
+
+        target = pass_target(round, entity)
+        return nil if !target || target.instance_of?(tag[1])
+
+        steps = round.steps
+        was = steps.index { |s| s.instance_of?(tag[1]) }
+        now = steps.index(target)
+        if was && now && was < now
+          @pass_drop_reason = "the #{describe_step(steps[was])} decision it answered had already been settled"
+          return :drop
+        end
+
+        GameError.new("This pass was for the \"#{describe_step(was && steps[was], tag[1])}\" step, " \
+                      "but #{entity.name} now has a decision at \"#{describe_step(target)}\" first, " \
+                      'which it did not have here in the original game. Make that decision; the recorded ' \
+                      'pass is checked again afterwards.')
+      end
+
+      def describe_step(step, klass = nil)
+        step ? step.description : Retcon.step_name(klass)
+      rescue NotImplementedError, StandardError
+        Retcon.step_name(klass || step.class)
       end
 
       # Trains are identified by serial number ("2-1" is the second 2-train),

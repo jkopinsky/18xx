@@ -98,6 +98,63 @@ module Engine
       end
     end
 
+    describe 'changing a tile lay that later passes depended on, in 1817 15528' do
+      let(:data) { Engine.retcon_fixture('1817', '15528') }
+      let(:pass) { { 'type' => 'pass', 'entity' => 'A&S', 'entity_type' => 'corporation' } }
+
+      # Recorded: A&S lays a tile (211), passes its second lay (212), runs
+      # routes (213), pays (214). The table says A&S never laid that tile.
+      def without_the_lay(session)
+        expect(session.actions[210..213].map { |a| a['type'] }).to eq(%w[lay_tile pass run_routes dividend])
+        session.replace(211, pass)
+        session.replay
+      end
+
+      it 'drops the recorded pass for a decision that is already settled instead of spending it elsewhere' do
+        session = Retcon::Session.new(data)
+        result = without_the_lay(session)
+
+        dropped = result.changes.select { |c| c['kind'] == 'stale_pass_dropped' }
+        expect(dropped.size).to eq(1)
+        expect(dropped.first['reason']).to include('Track')
+
+        # Without the tile A&S has no route; the recorded run is flagged, not
+        # consumed by whatever move the table makes next.
+        expect(result.broken_action['type']).to eq('run_routes')
+        expect(result.suggestion['choice']).to eq('skip')
+        expect(session.resolve_mode(pass)).to eq(:insert)
+      end
+
+      it 'stops for a decision the original game did not have, and keeps the recorded action for later' do
+        # The edited history from above, up to the end of A&S's turn, as if it
+        # had been committed.
+        session = Retcon::Session.new(data)
+        lay = Retcon.deep_dup(session.actions[210])
+        result = without_the_lay(session)
+        result = session.skip while result.broken? && result.broken_action['entity'] == 'A&S'
+        edited = data.merge('actions' => session.actions.first(result.broken_index || session.actions.size))
+
+        # Now put the tile lay back: A&S gets its second lay decision again.
+        again = Retcon::Session.new(edited)
+        result = again.replace(211, lay).replay
+        expect(result.broken?).to eq(true)
+        expect(result.broken_action['entity']).to eq('A&S')
+        recorded = again.broken_recorded_action
+        index = result.broken_index
+        expect(again.resolve_mode(pass)).to eq(:insert)
+
+        again.resolve(pass)
+        expect(Retcon.comparable(Retcon.scrub(again.actions[index + 1])).except('auto_actions'))
+          .to eq(Retcon.comparable(Retcon.scrub(recorded)).except('auto_actions'))
+      end
+
+      it 'never sends the step notes out with the actions' do
+        session = Retcon::Session.new(data)
+        without_the_lay(session)
+        expect(session.actions.none? { |a| a.key?(Retcon::STEP_TAG) }).to eq(true)
+      end
+    end
+
     describe 'paying out in full instead of half in 1817 15528' do
       let(:data) { Engine.retcon_fixture('1817', '15528') }
 

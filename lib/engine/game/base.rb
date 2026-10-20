@@ -1056,6 +1056,20 @@ module Engine
       # A warm spare for undo/redo (see ReplayCache); set by the browser.
       attr_accessor :replay_cache
 
+      # Which step processed each action, by action id: [round class, step
+      # class]. A pass goes to whichever step is blocking,
+      # so this is how a history fix can tell which decision a recorded pass
+      # was for.
+      def action_steps
+        @action_steps ||= {}
+      end
+
+      def note_action_step(action, step)
+        return unless action.id
+
+        action_steps[action.id] = [@round.class, step.class]
+      end
+
       def clone(actions)
         if @replay_cache && (game = @replay_cache.take(actions))
           # The rebuilt game inherits the remaining spares.
