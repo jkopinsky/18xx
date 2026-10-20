@@ -181,10 +181,11 @@ module View
             h(:td, { style: cell_style.merge(textAlign: 'right', color: r[:change].negative? ? 'red' : 'inherit') },
               signed(r[:change])),
             h(:td, { style: cell_style.merge(textAlign: 'right') }, fmt(r[:balance])),
-            h(:td, { style: cell_style }, r[:reasons].join(' · ')),
+            h(:td, { style: cell_style.merge(whiteSpace: 'normal', minWidth: '16rem') }, r[:reasons].join(' · ')),
           ])
         end
-        h(:table, { style: { borderCollapse: 'collapse' } }, [h(:thead, [header]), h(:tbody, body)])
+        table = h(:table, { style: { borderCollapse: 'collapse' } }, [h(:thead, [header]), h(:tbody, body)])
+        h(:div, { style: { overflowX: 'auto' } }, [table])
       end
 
       # "SR 3", "OR 3.2", "Setup"
@@ -195,8 +196,9 @@ module View
         row[:round_num] && !stock ? "#{row[:round]} #{row[:turn]}.#{row[:round_num]}" : "#{row[:round]} #{row[:turn]}"
       end
 
+      # Labels and numbers stay on one line; only "What happened" wraps.
       def cell_style
-        { padding: '0.2rem 0.6rem', borderBottom: '1px solid rgba(128,128,128,0.3)', verticalAlign: 'top' }
+        { padding: '0.2rem 0.6rem', borderBottom: '1px solid rgba(128,128,128,0.3)', verticalAlign: 'top', whiteSpace: 'nowrap' }
       end
 
       def fmt(amount)

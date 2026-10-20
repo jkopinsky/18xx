@@ -44,7 +44,7 @@ module View
               c[:change_since_sr] ? signed(c[:change_since_sr]) : 'new'),
           ])
         end
-        h(:table, { style: table_style }, [h(:thead, [h(:tr, header)]), h(:tbody, rows)])
+        scroll(h(:table, { style: table_style }, [h(:thead, [h(:tr, header)]), h(:tbody, rows)]))
       end
 
       def render_player(perf, player, since)
@@ -77,10 +77,15 @@ module View
           if rows.empty?
             h(:div, 'No shares yet.')
           else
-            h(:table, { style: table_style }, [h(:thead, [h(:tr, header)]),
-                                               h(:tbody, body + [footer])])
+            scroll(h(:table, { style: table_style }, [h(:thead, [h(:tr, header)]),
+                                                      h(:tbody, body + [footer])]))
           end,
         ])
+      end
+
+      # Wide tables scroll sideways on their own instead of widening the page.
+      def scroll(table)
+        h(:div, { style: { overflowX: 'auto' } }, [table])
       end
 
       def money_cell(value, bold: false)
@@ -105,7 +110,7 @@ module View
       end
 
       def cell
-        { padding: '0.2rem 0.6rem', borderBottom: '1px solid rgba(128,128,128,0.3)', textAlign: 'left' }
+        { padding: '0.2rem 0.6rem', borderBottom: '1px solid rgba(128,128,128,0.3)', textAlign: 'left', whiteSpace: 'nowrap' }
       end
 
       def num
