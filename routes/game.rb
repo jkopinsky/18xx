@@ -169,6 +169,43 @@ class Api
             game.to_h
           end
 
+          # POST '/api/game/<game_id>/retcon'
+          # Replaces the whole action history with a corrected one (table mode
+          # only). The new history must replay cleanly under the rules. The old
+          # history is saved to a backup file first, and every open browser is
+          # told to reload.
+          r.is 'retcon' do
+            halt(403, 'Retcon is only available in table mode') unless TABLE_MODE
+            halt(400, 'Archived games cannot be changed.') if game.status == 'archived'
+            halt(400, 'Game has not started') if game.status == 'new'
+
+            new_actions = r.params['actions']
+            halt(400, 'No actions given') unless new_actions.is_a?(Array)
+
+            DB.with_advisory_lock(:action_lock, game.id) do
+              expected = r.params['base_action_count']
+              if expected && expected.to_i != actions_h(game).size
+                halt(409, 'The game changed while you were editing. Reload and try again.')
+              end
+
+              backup = TableHistory.backup!(game)
+              begin
+                DB.transaction do
+                  engine = TableHistory.replace_actions!(game, new_actions, user.id)
+                  set_game_state(game, engine, users)
+                end
+              rescue Engine::GameError => e
+                halt(400, "The corrected history does not replay: #{e.message}")
+              end
+              API_LOGGER.info("Retcon of game #{game.id} by user #{user.id}; backup at #{backup}")
+            end
+
+            publish("/game/#{game.id}", id: 0, type: 'retcon')
+            # Reload so the reply carries the new history, not the cached one.
+            game.refresh
+            game.to_h(include_actions: true)
+          end
+
           not_authorized! unless game.user_id == user.id
 
           # POST '/api/game/<game_id>/delete

@@ -39,12 +39,20 @@ module Engine
     # undo/redo entries themselves, and renumbers ids 1..n so that inserting or
     # deleting actions cannot break id references.
     def flatten(actions)
+      flatten_with_ids(actions).first
+    end
+
+    # Like flatten, and also returns the original id of each kept action, so
+    # the game log (which is keyed by original ids) can describe it.
+    def flatten_with_ids(actions)
       filtered, _active_undos = Engine::Game::Base.filtered_actions(actions)
-      filtered.compact.each_with_index.map do |action, index|
-        flat = deep_dup(action)
-        flat['id'] = index + 1
-        flat
+      kept = filtered.compact
+      flat = kept.each_with_index.map do |action, index|
+        copy = deep_dup(action)
+        copy['id'] = index + 1
+        copy
       end
+      [flat, kept.map { |a| a['id'] }]
     end
 
     def renumber!(actions)
@@ -181,7 +189,7 @@ module Engine
       def error_message
         return nil unless @error
 
-        msg = @error.message.to_s
+        msg = friendly(@error.message.to_s)
         msg = @error.class.name if msg.empty?
         round = "#{Retcon.round_label(@game.round)} #{@game.turn}.#{@game.round.round_num}"
         "#{round}: #{actor_name} can no longer #{action_words}. #{msg}"
@@ -194,7 +202,9 @@ module Engine
         return nil if !broken? || !@broken_action
 
         current = @game.current_entity
-        if @broken_action['type'] == 'pass' && current && current.id.to_s != @broken_action['entity'].to_s
+        return nil if !current || current.id.to_s == @broken_action['entity'].to_s
+
+        if @broken_action['type'] == 'pass'
           return {
             'choice' => 'skip',
             'reason' => "It is #{current.name}'s turn, not #{actor_name}'s, " \
@@ -202,13 +212,31 @@ module Engine
           }
         end
 
-        nil
+        # The change ended this entity's turn before the recorded action: it
+        # can no longer happen at all. Skipping is usually right, but it did
+        # move money or shares, so the table should check the preview.
+        {
+          'choice' => 'skip',
+          'reason' => "#{actor_name}'s turn is already over (it is #{current.name}'s turn now), " \
+                      "so this #{action_words} can no longer happen. Skip it, then check the " \
+                      'preview, since it moved money or shares in the original game.',
+        }
       end
 
       HOUSEKEEPING_ACTIONS = %w[end_game log message undo redo].freeze
 
       def player_actions(actions)
         actions.reject { |a| HOUSEKEEPING_ACTIONS.include?(a) || a.start_with?('program_') }
+      end
+
+      # Rewords common engine messages for the table.
+      def friendly(msg)
+        if (m = msg.match(/Blocking step (.+?) cannot process action (\w+)/))
+          step = m[1]
+          return "The game is now at the \"#{step}\" step, where a #{m[2].tr('_', ' ')} is not possible."
+        end
+
+        msg.gsub(/\b([a-z]+(?:_[a-z]+)+)\b/) { Regexp.last_match(1).tr('_', ' ') }
       end
 
       def actor_name
@@ -231,23 +259,59 @@ module Engine
         {
           'entity' => entity&.name,
           'entity_id' => entity&.id,
-          'actions' => entity ? player_actions(@game.round.actions_for(entity)) : [],
+          'actions' => entity ? player_actions(@game.round.actions_for(entity)).map { |a| a.tr('_', ' ') } : [],
         }
       end
     end
 
     class Session
-      attr_reader :original_actions, :actions, :dirty_from, :changes
+      attr_reader :original_actions, :actions, :dirty_from, :changes, :source_ids, :slot
 
-      # data: the game as a Hash, as found in a game's JSON export
-      def initialize(data)
+      # data: the game as a Hash, as found in a game's JSON export.
+      # original_game: the game already loaded from that data, if the caller
+      # has one (saves a replay).
+      def initialize(data, original_game: nil)
         @data = data
-        @original_actions = Retcon.flatten(data['actions'] || [])
+        @original_actions, @source_ids = Retcon.flatten_with_ids(data['actions'] || [])
         @actions = Retcon.deep_dup(@original_actions)
+        @original_game = original_game
         @dirty_from = nil
         @broken_index = nil
+        @slot = nil
         @changes = []
         @train_remap = {}
+      end
+
+      # Opens a place in history where a new move is needed: :replace removes
+      # the action with this id and asks for one in its place, :insert asks for
+      # a move just before it. Returns the game as it stood at that point, for
+      # the table to make the move on.
+      def open_slot(id, mode)
+        idx = index_of(id)
+        @actions.delete_at(idx) if mode == :replace
+        Retcon.renumber!(@actions)
+        @dirty_from = [@dirty_from || idx, idx].min
+        @broken_index = nil
+        @slot = idx
+        load(@actions[0...idx])
+      end
+
+      # Fills the open slot with the table's move and replays forward.
+      def fill_slot(action)
+        raise GameError, 'No open slot' unless @slot
+
+        idx = @slot
+        @slot = nil
+        @actions.insert(idx, Retcon.deep_dup(action))
+        Retcon.renumber!(@actions)
+        @changes = []
+        @train_remap = {}
+        continue_from(load(@actions[0...idx]), idx)
+      end
+
+      # True once anything has been changed.
+      def edited?
+        !@dirty_from.nil?
       end
 
       def load(actions)

@@ -20,6 +20,7 @@ module View
     needs :connected, default: false, store: true
     needs :scroll_pos, default: nil, store: true
     needs :chat_input, default: '', store: true
+    needs :retcon, default: nil, store: true
 
     APP_PADDING_BOTTOM = '2vmin'
 
@@ -105,10 +106,18 @@ module View
     def render
       @pin = @game_data.dig('settings', 'pin')
 
-      begin
-        load_game
-      rescue Engine::OptionError => e
-        return render_bad_options(e.message)
+      if (retcon_game = retcon_display_game)
+        # Fixing history: show the draft game (at the point a move is needed,
+        # or the corrected game while previewing), not the live one.
+        @game = retcon_game
+        @last_action_id = @game.raw_actions.last&.fetch('id') || 0
+        store(:game, @game, skip: true)
+      else
+        begin
+          load_game
+        rescue Engine::OptionError => e
+          return render_bad_options(e.message)
+        end
       end
 
       return h('div.padded', 'Loading game...') unless @game
@@ -138,6 +147,8 @@ module View
           h(Game::Ledger, game: @game)
         when 'holdings'
           h(Game::Holdings, game: @game)
+        when 'fix'
+          h(Game::FixHistory, game: @game)
         when 'tools'
           h(Game::Tools, game: @game, game_data: @game_data, user: @user)
         when 'auto'
@@ -151,6 +162,10 @@ module View
 
       unless @connected
         @connection&.subscribe(game_path) do |data|
+          # While history is being fixed, the page shows a draft game; live
+          # updates resume when the fix is committed or cancelled.
+          next if store['retcon']
+
           # make sure we're using the newest stored vars
           # since connection is only created on the initial view
           # and views are ephemeral
@@ -212,11 +227,42 @@ module View
 
       children = [
         menu,
+        render_retcon_banner,
         page,
-      ]
+      ].compact
       children.unshift(render_broken_game(@game.exception)) if @game.exception
 
       h('div#game', props, children)
+    end
+
+    def retcon_display_game
+      return nil unless @retcon
+
+      @retcon.awaiting_move? ? @retcon.display_game : @retcon.result&.game
+    end
+
+    def render_retcon_banner
+      return nil unless @retcon
+
+      text =
+        if @retcon.awaiting_move?
+          "Fixing history — #{@retcon.message} Moves you make now go into the fix, not the live game."
+        else
+          'Fixing history — previewing the corrected game. Commit or cancel on the Fix history tab.'
+        end
+      h('div.padded', {
+          style: {
+            background: '#ffe680',
+            color: 'black',
+            margin: '0.5rem 0',
+            border: '2px solid #c9a400',
+          },
+        }, [
+          h(:span, text),
+          ' ',
+          h(:a, { attrs: { href: '#fix', onclick: 'return false' }, on: { click: -> { change_anchor('#fix') } } },
+            'Open Fix history'),
+        ])
     end
 
     def scroll_to_game_menu
@@ -282,6 +328,8 @@ module View
           change_anchor('#ledger')
         when 'h'
           change_anchor('#holdings')
+        when 'f'
+          change_anchor('#fix')
         when 'o'
           change_anchor('#tools')
         when 'a'
@@ -376,6 +424,7 @@ module View
       menu_items << item('S|preadsheet', '#spreadsheet')
       menu_items << item('L|edger', '#ledger')
       menu_items << item('H|oldings', '#holdings')
+      menu_items << item('F|ix history', '#fix')
       menu_items << item("To|ols#{' 📝' if note}", '#tools')
 
       enabled = !@game.programmed_actions[@game.player_by_id(@user['id'])].empty? if @user
@@ -500,7 +549,9 @@ module View
       children = []
       children << render_round
       children << h(Game::GameLog, user: @user, scroll_pos: @scroll_pos, chat_input: @chat_input)
-      children << h(Game::HistoryAndUndo, last_action_id: @last_action_id)
+      # Undo and history browsing act on the live game, so they are hidden
+      # while history is being fixed.
+      children << h(Game::HistoryAndUndo, last_action_id: @last_action_id) unless @retcon
       children << h(Game::EntityOrder, round: @round)
       unless @game.finished
         children << h(Game::Abilities, user: @user, game: @game)

@@ -24,6 +24,7 @@ module View
         base.needs :round_history, default: nil, store: true
         base.needs :selected_action_id, default: nil, store: true
         base.needs :show_hand, default: false, store: true
+        base.needs :retcon, default: nil, store: true
       end
 
       def save_user_settings(settings)
@@ -67,6 +68,10 @@ module View
       end
 
       def process_action(action)
+        if (retcon = store['retcon']) && retcon.awaiting_move?
+          return process_retcon_action(retcon, action)
+        end
+
         if @game.exception
           msg = 'This game is broken and cannot accept any new actions. If '\
                 'this issue has not already been reported, please follow the '\
@@ -159,6 +164,28 @@ module View
         clear_ui_state
         store(:flash_opts, e.message)
         `setTimeout(function() { self['$store']('game', Opal.nil) }, 10)`
+      end
+
+      # While fixing history, a move made on the normal screens goes into the
+      # fix: it fills the open slot (or replaces the action that broke) and the
+      # rest of history replays from there.
+      def process_retcon_action(retcon, action)
+        retcon.fill(action.to_h)
+        clear_ui_state
+        base = @app_route.split('#').first
+        store(:retcon, retcon, skip: true)
+        if retcon.awaiting_move?
+          store(:game, retcon.display_game, skip: true)
+          store(:flash_opts, "Another action no longer works: #{retcon.message}", skip: true)
+          store(:app_route, base)
+        else
+          store(:game, retcon.result.game, skip: true)
+          store(:flash_opts, 'The fix replays cleanly. Review and commit it on the Fix history tab.', skip: true)
+          store(:app_route, "#{base}#fix")
+        end
+      rescue StandardError => e
+        LOGGER.error(e)
+        store(:flash_opts, "That move could not be used: #{e.message}")
       end
 
       def clear_ui_state
