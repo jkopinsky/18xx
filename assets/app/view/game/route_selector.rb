@@ -267,13 +267,19 @@ module View
           store(:flash_opts, { message: message }, skip: false)
         end
 
+        # Auto always starts from scratch: routes already drawn are cleared
+        # and every train is routed together, so afterwards the full set of
+        # routes is the best one the router can find, never a best fit around
+        # routes drawn by hand. (Trains added by hand in games with adjustable
+        # train lists are kept, but their routes are recomputed too.)
         auto = lambda do
           router = Engine::AutoRouter.new(@game, flash)
+          @routes.each(&:reset!)
           store(:autorouter_running, true, skip: true)
           store(:autorouter, router)
           router.compute(
             @game.current_entity,
-            routes: @routes.reject { |r| r.paths.empty? },
+            routes: [],
             path_timeout: setting_for(:path_timeout).to_i,
             route_timeout: setting_for(:route_timeout).to_i,
             callback: lambda do |routes|
@@ -342,7 +348,10 @@ module View
           buttons << if @autorouter_running
                        h('button.small', { attrs: { id: 'autoroute' }, on: { click: auto_stop } }, 'Stop Auto')
                      else
-                       h('button.small', { attrs: { id: 'autoroute' }, on: { click: auto } }, 'Auto')
+                       h('button.small', {
+                           attrs: { id: 'autoroute', title: 'Best routes for all trains, replacing any drawn – hotkey: 3' },
+                           on: { click: auto },
+                         }, 'Auto')
                      end
         end
         if @game.adjustable_train_list?(current_entity)

@@ -113,9 +113,13 @@ module View
         else
           lines << h(:p, @retcon.message)
         end
+        if (note = @retcon.next_move_note)
+          lines << h(:p, { style: { fontStyle: 'italic' } }, note)
+        end
         lines << h(:div, [
           h(:button, { on: { click: -> { store(:app_route, @app_route.split('#').first) } } }, 'Go to the Game tab to move'),
           broken ? button('Skip this action', -> { act { @retcon.skip } }) : nil,
+          @retcon.can_undo_step? ? button('Undo last fix step (u)', -> { act { @retcon.undo_step } }) : nil,
           button('Cancel the fix', -> { cancel }),
         ].compact)
         h(:div, lines)
@@ -139,6 +143,7 @@ module View
             case c['kind']
             when 'route_revenue' then "Action #{c['id']}: route revenue changes from #{show(c['before'])} to #{show(c['after'])}"
             when 'train_renumbered' then "Action #{c['id']}: buys train #{c['after']} instead of #{c['before']}"
+            when 'stale_pass_dropped' then "#{c['before']}'s recorded pass was dropped: its turn had already ended"
             else "Action #{c['id']} (#{c['type']}): different automatic follow-up actions"
             end
           h(:li, text)
@@ -159,8 +164,9 @@ module View
           end,
           h(:div, { style: { marginTop: '1rem' } }, [
             button('Commit the corrected history', -> { commit }),
+            @retcon.can_undo_step? ? button('Undo last fix step (u)', -> { act { @retcon.undo_step } }) : nil,
             button('Cancel the fix', -> { cancel }),
-          ]),
+          ].compact),
         ].compact)
       end
 

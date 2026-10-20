@@ -132,7 +132,10 @@ module View
         when nil
           render_game
         when 'map'
-          h(Game::Map, game: @game, opacity: 1.0, tile_selector: @tile_selector)
+          h(:div, [
+            h(Game::MapTurnControls, game: @game, actions: current_entity_actions),
+            h(Game::Map, game: @game, opacity: 1.0, tile_selector: @tile_selector),
+          ])
         when 'market'
           h(Game::StockMarket, game: @game, explain_colors: true)
         when 'tiles'
@@ -283,7 +286,9 @@ module View
 
       text =
         if @retcon.awaiting_move?
-          "Fixing history — #{@retcon.message} Moves you make now go into the fix, not the live game."
+          note = @retcon.next_move_note
+          "Fixing history — #{@retcon.message} #{note ? note + ' ' : ''}" \
+            'Moves you make now go into the fix, not the live game (u takes back a step).'
         else
           'Fixing history — previewing the corrected game. Commit or cancel on the Fix history tab.'
         end
@@ -371,8 +376,10 @@ module View
           change_anchor('#tools')
         when 'a'
           change_anchor('#auto')
-        when '1'
-          button_click('pass')
+        when 'p', '1'
+          pass_hotkey
+        when 'u'
+          undo_hotkey
         when '2'
           button_click('clearall')
         when '3'
@@ -398,6 +405,35 @@ module View
           end
         end
       end
+    end
+
+    # Passes the current step. On the Map tab, if the next step is not on the
+    # map (buying trains, running routes, the next company's turn, ...), goes
+    # back to the Game tab. Never opens the map by itself, so the Game tab
+    # stays the place to see who acts next.
+    def pass_hotkey
+      return unless Native(`document.getElementById('pass')`)
+
+      was_on_map = route_anchor == 'map'
+      button_click('pass')
+      return unless was_on_map
+      return unless store['app_route'].to_s.end_with?('#map')
+
+      game = store['game']
+      return if !game || game.exception || Game::MapTurnControls.map_step?(game)
+
+      store(:tile_selector, nil, skip: true)
+      store(:app_route, store['app_route'].split('#').first)
+    end
+
+    # Undo; while fixing history, takes back the last step of the fix instead.
+    def undo_hotkey
+      retcon = store['retcon']
+      return button_click('undo') unless retcon
+      return if !retcon.can_undo_step? || !retcon.undo_step
+
+      store(:retcon, retcon, skip: true)
+      store(:game, retcon.awaiting_move? ? retcon.display_game : retcon.result.game)
     end
 
     def game_path

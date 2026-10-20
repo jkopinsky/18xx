@@ -12,6 +12,7 @@ module View
 
       def render
         props = {
+          attrs: { title: 'Shortcut: p' },
           on: {
             click: lambda do
               @before_process_pass.call

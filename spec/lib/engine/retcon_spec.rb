@@ -72,8 +72,78 @@ module Engine
         renumbered = result.changes.select { |c| c['kind'] == 'train_renumbered' }
         expect(renumbered.empty?).to eq(false)
         expect(result.broken?).to eq(true)
-        expect(result.broken_action['type']).to eq('pass')
+        # Passes by companies whose turn the change already ended are dropped
+        # without asking; replay stops at the first action that really breaks.
+        expect(result.changes.count { |c| c['kind'] == 'stale_pass_dropped' }).to be > 0
+        expect(result.broken_action['type']).not_to eq('pass')
         expect(result.suggestion['choice']).to eq('skip')
+      end
+
+      it 'adds a move for a different entity before the broken action instead of replacing it' do
+        session = Retcon::Session.new(data)
+        target = session.actions.find { |a| a['type'] == 'buy_train' }
+        session.delete(target['id'])
+        result = session.replay
+        broken = session.broken_recorded_action
+        current = result.game.current_entity
+        expect(current.id.to_s).not_to eq(broken['entity'].to_s)
+
+        move = { 'type' => 'pass', 'entity' => current.id, 'entity_type' => current.player? ? 'player' : 'corporation' }
+        expect(session.resolve_mode(move)).to eq(:insert)
+        index = result.broken_index
+        session.resolve(move)
+        expect(session.actions[index]['entity'].to_s).to eq(current.id.to_s)
+        expect(Retcon.comparable(Retcon.scrub(session.actions[index + 1])).except('auto_actions'))
+          .to eq(Retcon.comparable(Retcon.scrub(broken)))
+      end
+    end
+
+    describe 'paying out in full instead of half in 1817 15528' do
+      let(:data) { Engine.retcon_fixture('1817', '15528') }
+
+      # PSNR paid half, bought a train, then passed on the rest of its train
+      # step. Paying out in full leaves it unable to afford the train.
+      it 'keeps the table in step after the train purchase is replaced by a pass' do
+        session = Retcon::Session.new(data)
+        original = session.actions.map { |a| Retcon.deep_dup(a) }
+        dividend = session.actions.find { |a| a['id'] == 381 }
+        expect([dividend['type'], dividend['entity'], dividend['kind']]).to eq(%w[dividend PSNR half])
+        expect(original[381..382].map { |a| [a['type'], a['entity']] }).to eq([%w[buy_train PSNR], %w[pass PSNR]])
+
+        session.replace(381, dividend.merge('kind' => 'payout'))
+        result = session.replay
+        expect(result.broken?).to eq(true)
+        expect(result.broken_action['type']).to eq('buy_train')
+
+        pass = { 'type' => 'pass', 'entity' => 'PSNR', 'entity_type' => 'corporation' }
+        expect(session.resolve_mode(pass)).to eq(:replace)
+        result = session.resolve(pass)
+
+        # The recorded "pass on the remaining trains" is dropped, and the next
+        # company's recorded actions follow the table's pass directly.
+        dropped = result.changes.select { |c| c['kind'] == 'stale_pass_dropped' }
+        expect(dropped.map { |c| c['before'] }).to eq(['PSNR'])
+        expect(session.actions[381]['type']).to eq('pass')
+        expect(session.actions[381]['entity']).to eq('PSNR')
+        expect([session.actions[382]['type'], session.actions[382]['entity']])
+          .to eq([original[383]['type'], original[383]['entity']])
+        expect(result.broken_action['entity']).to eq('PSNR') if result.broken?
+        expect(result.broken_action['type']).not_to eq('pass') if result.broken?
+      end
+
+      it 'steps back to an earlier point with snapshot and restore' do
+        session = Retcon::Session.new(data)
+        dividend = session.actions.find { |a| a['id'] == 381 }
+        session.replace(381, dividend.merge('kind' => 'payout'))
+        session.replay
+        snap = session.snapshot
+        before = session.actions.map { |a| a['type'] }
+        session.resolve({ 'type' => 'pass', 'entity' => 'PSNR', 'entity_type' => 'corporation' })
+        expect(session.actions.map { |a| a['type'] }).not_to eq(before)
+
+        session.restore(snap)
+        expect(session.actions.map { |a| a['type'] }).to eq(before)
+        expect(session.broken_recorded_action['type']).to eq('buy_train')
       end
     end
 

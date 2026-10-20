@@ -22,6 +22,7 @@ module Lib
       @display_game = nil
       @message = nil
       @last_edit = nil
+      @history = []
     end
 
     def awaiting_move?
@@ -54,15 +55,59 @@ module Lib
 
     # A move made on the Game tab while awaiting one.
     def fill(action_h)
+      remember
       if @session.slot
         apply(@session.fill_slot(action_h))
       else
         apply(@session.resolve(action_h))
       end
+    rescue StandardError
+      undo_step
+      raise
     end
 
     def skip
+      remember
       apply(@session.skip)
+    end
+
+    # True when a move or skip made during this fix can be taken back.
+    def can_undo_step?
+      !@history.empty?
+    end
+
+    # Takes back the last move or skip made during this fix.
+    def undo_step
+      snap = @history.pop
+      return false unless snap
+
+      @session.restore(snap[:session])
+      @result = snap[:result]
+      @status = snap[:status]
+      @display_game = snap[:display_game]
+      @message = snap[:message]
+      true
+    end
+
+    # What the table's next move will do, for the banner and the Fix history
+    # tab: nil when no move is awaited.
+    def next_move_note
+      return nil unless awaiting_move?
+      return 'Your next move goes into the gap you opened.' if @session.slot
+
+      broken = @session.broken_recorded_action
+      return nil if !broken || !@result
+
+      game = @result.game
+      actor = game.get(broken['entity_type'], broken['entity'])&.name || broken['entity'].to_s
+      what = broken['type'].to_s.tr('_', ' ')
+      current = game.current_entity&.name
+      if current && current != actor
+        "It is #{current}'s turn: your next move is added before the recorded \"#{actor}: #{what}\" " \
+          "(action #{broken['id']}), which is tried again afterwards."
+      else
+        "Your next move for #{actor} replaces the recorded \"#{what}\" (action #{broken['id']})."
+      end
     end
 
     def preview
@@ -74,6 +119,16 @@ module Lib
     end
 
     private
+
+    def remember
+      @history << {
+        session: @session.snapshot,
+        result: @result,
+        status: @status,
+        display_game: @display_game,
+        message: @message,
+      }
+    end
 
     def apply(result)
       @result = result

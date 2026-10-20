@@ -363,14 +363,62 @@ module Engine
         continue_from(game, start)
       end
 
-      # Replaces the broken action with a new one and carries on.
+      # Uses the table's move at the point where replay stopped.
+      #
+      # A move by the entity whose recorded action broke takes that action's
+      # place. A move by anyone else (the change already ended the recorded
+      # entity's turn, say) is added before the broken action, which is then
+      # tried again: a recorded action is only ever replaced by a move for the
+      # same entity, so the table's moves and the recorded ones never drift
+      # out of step.
       def resolve(action)
         raise GameError, 'Nothing to resolve' unless @broken_index
 
         idx = @broken_index
-        @actions[idx] = Retcon.deep_dup(action)
+        if resolve_mode(action) == :replace
+          @actions[idx] = Retcon.deep_dup(action)
+        else
+          @actions.insert(idx, Retcon.deep_dup(action))
+        end
         Retcon.renumber!(@actions)
         continue_from(load(@actions[0...idx]), idx)
+      end
+
+      # :replace or :insert, for a move offered at the broken point.
+      def resolve_mode(action)
+        broken = @broken_index && @actions[@broken_index]
+        return :insert unless broken
+
+        same = broken['entity'].to_s == action['entity'].to_s &&
+               broken['entity_type'].to_s == action['entity_type'].to_s
+        same ? :replace : :insert
+      end
+
+      # The recorded action that stopped the replay, if any.
+      def broken_recorded_action
+        @broken_index && @actions[@broken_index]
+      end
+
+      # Everything needed to step back to this point.
+      def snapshot
+        {
+          actions: Retcon.deep_dup(@actions),
+          dirty_from: @dirty_from,
+          broken_index: @broken_index,
+          slot: @slot,
+          changes: Retcon.deep_dup(@changes),
+          train_remap: @train_remap.dup,
+        }
+      end
+
+      def restore(snap)
+        @actions = Retcon.deep_dup(snap[:actions])
+        @dirty_from = snap[:dirty_from]
+        @broken_index = snap[:broken_index]
+        @slot = snap[:slot]
+        @changes = Retcon.deep_dup(snap[:changes])
+        @train_remap = snap[:train_remap].dup
+        self
       end
 
       # Drops the broken action and carries on.
@@ -399,7 +447,8 @@ module Engine
 
       def continue_from(game, start)
         done = []
-        (start...@actions.size).each do |i|
+        i = start
+        while i < @actions.size
           stored = @actions[i]
           attempt = Retcon.remap_trains(Retcon.scrub(stored), @train_remap)
           game.process_action(attempt, add_auto_actions: true)
@@ -416,6 +465,11 @@ module Engine
             start = i
             game = load(@actions[0...i])
 
+            if stale_pass?(game, attempt)
+              drop_stale_pass(game, i, attempt)
+              next
+            end
+
             repaired = repair_train_purchase(game, attempt)
             unless repaired
               game = load(@actions[0...i]) if game.exception
@@ -428,11 +482,37 @@ module Engine
           replayed = Retcon.deep_dup(game.raw_actions.last)
           done << replayed
           note_change(i, stored, replayed)
+          i += 1
         end
 
         @broken_index = nil
         @actions = game.raw_actions.map { |a| Retcon.deep_dup(a) }
         Result.new(status: :clean, game: game, changes: @changes)
+      end
+
+      # A recorded pass by an entity that is no longer acting: the change ended
+      # its turn early (it can no longer afford a train, say), so the pass that
+      # ended its turn in the original game has nothing left to do. A pass
+      # moves no money or holdings, so it is dropped without asking.
+      def stale_pass?(game, attempt)
+        return false unless attempt['type'] == 'pass'
+
+        active = game.round.active_entities.map { |e| e.id.to_s }
+        !active.empty? && !active.include?(attempt['entity'].to_s)
+      end
+
+      def drop_stale_pass(game, index, attempt)
+        entity = game.get(attempt['entity_type'], attempt['entity'])
+        @actions.delete_at(index)
+        Retcon.renumber!(@actions)
+        @changes << {
+          'index' => index,
+          'id' => attempt['id'],
+          'type' => 'pass',
+          'kind' => 'stale_pass_dropped',
+          'before' => entity&.name || attempt['entity'].to_s,
+          'after' => nil,
+        }
       end
 
       # Trains are identified by serial number ("2-1" is the second 2-train),

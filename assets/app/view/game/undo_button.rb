@@ -12,7 +12,7 @@ module View
           {
             attrs: {
               disabled: !@game.undo_possible,
-              title: 'Undo – shortcut: ctrl+z',
+              title: 'Undo – shortcut: u or ctrl+z',
             },
             on: {
               click: -> { process_action(Engine::Action::Undo.new(@game.current_entity)) },
