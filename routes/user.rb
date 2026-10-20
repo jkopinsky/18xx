@@ -170,9 +170,10 @@ class Api
 
   # Cloudflare Turnstile check for the unauthenticated auth endpoints, to stop
   # scripted signup/login abuse. Skipped in the test env; if the verify request
-  # itself errors it fails closed in production, open elsewhere.
+  # itself errors it fails closed in production, open elsewhere. Also skipped in
+  # TABLE_MODE (a private local server).
   def verify_turnstile!
-    return if ENV['RACK_ENV'] == 'test'
+    return if ENV['RACK_ENV'] == 'test' || TABLE_MODE
 
     token = request.params['cf_turnstile_response'].to_s
     halt(400, 'Please complete the captcha') if token.empty?

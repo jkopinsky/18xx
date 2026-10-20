@@ -2,11 +2,21 @@
 
 PRODUCTION = ENV['RACK_ENV'] == 'production'
 
+# Table mode: a private server on one laptop at the table, often offline. There
+# is no public signup to protect, so the Cloudflare captcha is turned off.
+TABLE_MODE = ENV['TABLE_MODE'] == 'true'
+raise 'TABLE_MODE cannot be used in production' if PRODUCTION && TABLE_MODE
+
 # Cloudflare Turnstile challenge for the auth endpoints. The site key is public;
 # outside production we use Cloudflare's always-pass test keys so local dev works
 # without registering a hostname. In production the real secret is required -- we
 # never fall back to the always-pass test secret.
-TURNSTILE_SITEKEY = PRODUCTION ? '0x4AAAAAADuTm2-bvPUtb2pz' : '1x00000000000000000000AA'
+TURNSTILE_SITEKEY =
+  if TABLE_MODE
+    nil
+  else
+    PRODUCTION ? '0x4AAAAAADuTm2-bvPUtb2pz' : '1x00000000000000000000AA'
+  end
 raise 'TURNSTILE_SECRET must be set in production' if PRODUCTION && ENV['TURNSTILE_SECRET'].to_s.empty?
 
 TURNSTILE_SECRET = ENV['TURNSTILE_SECRET'] || '1x0000000000000000000000000000000AA'
