@@ -32,6 +32,8 @@ require_relative '../tile'
 require_relative '../train'
 require_relative '../player_info'
 require_relative '../game_log'
+require_relative '../ledger'
+require_relative '../performance'
 require_relative 'meta'
 
 module Engine
@@ -90,6 +92,8 @@ module Engine
 
     class Base
       include Game::Meta
+      prepend Ledger::GameHooks
+      prepend Performance::GameHooks
 
       attr_reader :raw_actions, :actions, :bank, :cities, :companies, :corporations,
                   :depot, :finished, :graph, :hexes, :id, :loading, :loans, :log, :minors,

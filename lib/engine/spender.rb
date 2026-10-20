@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'game_error'
+require_relative 'ledger'
 
 module Engine
   module Spender
@@ -25,9 +26,12 @@ module Engine
       # Check if we need to borrow from our borrow_from target
       if borrow_from && (cash > @cash)
         amount_borrowed = cash - @cash
+        Ledger.record(self, receiver, @cash)
+        Ledger.record(borrow_from, receiver, amount_borrowed)
         @cash = 0
         borrow_from.cash -= amount_borrowed
       else
+        Ledger.record(self, receiver, cash)
         @cash -= cash
       end
 
