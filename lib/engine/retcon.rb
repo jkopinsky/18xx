@@ -227,11 +227,12 @@ module Engine
     end
 
     class Result
-      attr_reader :status, :game, :broken_index, :broken_action, :error, :changes, :kind
+      attr_reader :status, :game, :broken_index, :broken_action, :error, :changes, :kind, :equivalent
 
       def initialize(status:, game:, broken_index: nil, broken_action: nil, error: nil, changes: [], kind: nil,
-                     recorded_step: nil)
+                     recorded_step: nil, equivalent: nil)
         @kind = kind
+        @equivalent = equivalent
         @recorded_step = recorded_step
         @status = status
         @game = game
@@ -266,7 +267,9 @@ module Engine
         return nil if !broken? || !@broken_action
 
         current = @game.current_entity
+        return missing_share_suggestion if @kind == :missing_share
         return nil unless current
+        return refused_move_suggestion if !@recorded_step && @kind == :rejected
         return same_entity_suggestion(current) if current.id.to_s == @broken_action['entity'].to_s
 
         case Retcon.recorded_round(@game, @recorded_step)
@@ -342,6 +345,27 @@ module Engine
           nil
         end
         step ? " (\"#{step}\")" : ''
+      end
+
+      # A recorded purchase or sale naming share certificates that no longer
+      # exist. It can't be tried again as it is.
+      def missing_share_suggestion
+        ids = Array(@equivalent&.dig('shares')).join(' and ')
+        alternative = ids.empty? ? '' : " or #{action_words} #{ids} instead (the same company and size)"
+        {
+          'choice' => 'skip',
+          'reason' => "Skip it if this #{action_words} no longer makes sense (for example it closed a short that " \
+                      "is now closed earlier),#{alternative}. Then check the preview.",
+          'equivalent' => @equivalent,
+        }
+      end
+
+      # A move entered during the fix that the rules refused.
+      def refused_move_suggestion
+        {
+          'choice' => 'redo',
+          'reason' => 'The move you just made is not allowed here. Make a different one; it takes its place.',
+        }
       end
 
       # The entity is still acting but has moved past the step where the
@@ -577,6 +601,9 @@ module Engine
                broken['entity_type'].to_s == action['entity_type'].to_s
         return :insert unless same
         return :insert if @broken_kind == :new_decision
+        # It can't be tried again as it is, so a move for the same entity is
+        # its replacement.
+        return :replace if @broken_kind == :missing_share
 
         game = @broken_game
         entity = game&.get(broken['entity_type'], broken['entity'])
@@ -663,6 +690,20 @@ module Engine
             return Result.new(status: :broken, game: game, broken_index: i, kind: :new_decision,
                               broken_action: attempt, error: verdict, changes: @changes,
                               recorded_step: stored[STEP_TAG])
+          end
+
+          if (missing = missing_shares(game, attempt))
+            @actions[start...i] = done
+            @broken_index = i
+            @broken_kind = :missing_share
+            @broken_game = game
+            equivalent = equivalent_share_action(game, attempt, missing)
+            error = GameError.new("It names #{missing.join(' and ')}, which no longer exist#{missing.size == 1 ? 's' : ''} " \
+                                  'after the change: share certificates are created and removed as shorts open and ' \
+                                  'close, so their numbers shift.')
+            return Result.new(status: :broken, game: game, broken_index: i, kind: :missing_share,
+                              broken_action: attempt, error: error, changes: @changes,
+                              recorded_step: stored[STEP_TAG], equivalent: equivalent)
           end
 
           game.process_action(attempt, add_auto_actions: true)
@@ -794,6 +835,60 @@ module Engine
                       "but #{entity.name} now has a decision at \"#{describe_step(target)}\" first, " \
                       'which it did not have here in the original game. Make that decision; the recorded ' \
                       'pass is checked again afterwards.')
+      end
+
+      SHARE_KEYS = %w[shares swap].freeze
+
+      # Share ids in the action that don't exist in the replayed game, or nil.
+      def missing_shares(game, attempt)
+        ids = Array(attempt['shares']) + Array(attempt['swap'])
+        return nil if ids.empty? || !%w[buy_shares sell_shares].include?(attempt['type'])
+
+        missing = ids.compact.reject { |id| game.share_by_id(id) }
+        missing.empty? ? nil : missing
+      end
+
+      # The same purchase or sale with existing certificates of the same
+      # company and size, offered to the table as a choice (never applied on
+      # its own: whether the move still makes sense is the table's call).
+      def equivalent_share_action(game, attempt, _missing)
+        entity = game.get(attempt['entity_type'], attempt['entity'])
+        return nil unless entity
+
+        used = []
+        shares = Array(attempt['shares']).map do |id|
+          share = game.share_by_id(id)
+          next share if share
+
+          corporation = game.corporation_by_id(id.to_s.rpartition('_').first)
+          return nil unless corporation
+
+          percent = missing_percent(attempt, corporation)
+          candidate = equivalent_share(game, entity, attempt['type'], corporation, percent, used)
+          return nil unless candidate
+
+          used << candidate
+          candidate
+        end
+        return nil if shares.empty?
+
+        attempt.merge('shares' => shares.map(&:id),
+                      'share_price' => attempt['type'] == 'buy_shares' ? shares.first.price_per_share : attempt['share_price'])
+      end
+
+      def missing_percent(attempt, corporation)
+        count = Array(attempt['shares']).size
+        attempt['percent'] && count.positive? ? attempt['percent'] / count : corporation.share_percent
+      end
+
+      def equivalent_share(game, entity, type, corporation, percent, used)
+        pool = if type == 'sell_shares'
+                 entity.shares_of(corporation)
+               else
+                 game.share_pool.shares_by_corporation[corporation] + corporation.shares_of(corporation)
+               end
+        pool.reject { |sh| used.include?(sh) || sh.president || sh.percent != percent }
+            .min_by(&:index)
       end
 
       def describe_step(step, klass = nil)

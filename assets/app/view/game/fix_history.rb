@@ -110,6 +110,9 @@ module View
         lines << h(:div, [
           h(:button, { on: { click: -> { store(:app_route, @app_route.split('#').first) } } }, 'Go to the Game tab to move'),
           broken ? button('Skip this action', -> { act { @retcon.skip } }) : nil,
+          if (equivalent = suggestion&.dig('equivalent'))
+            button("Use #{equivalent['shares'].join(' and ')} instead", -> { act { @retcon.use_equivalent } })
+          end,
           @retcon.can_undo_step? ? button('Undo last fix step (u)', -> { act { @retcon.undo_step } }) : nil,
           button('Cancel the fix', -> { cancel }),
         ].compact)

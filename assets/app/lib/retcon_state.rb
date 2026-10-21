@@ -105,6 +105,15 @@ module Lib
       apply(@session.skip)
     end
 
+    # Uses the suggested equivalent of a recorded action that names share
+    # certificates which no longer exist.
+    def use_equivalent
+      equivalent = @result&.suggestion&.dig('equivalent')
+      raise Engine::GameError, 'Nothing to use instead' unless equivalent
+
+      fill(equivalent)
+    end
+
     # True when a move or skip made during this fix can be taken back.
     def can_undo_step?
       !@history.empty?
@@ -128,6 +137,11 @@ module Lib
     def next_move_note
       return nil unless awaiting_move?
       return 'Your next move goes into the gap you opened.' if @session.slot
+
+      if @result&.kind == :missing_share
+        return 'This recorded action can\'t be used as it is: skip it, use the equivalent shares, or make the ' \
+               'move again on the Game tab (it takes its place).'
+      end
 
       broken = @session.broken_recorded_action
       return nil if !broken || !@result

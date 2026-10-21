@@ -99,6 +99,39 @@ module Engine
       end
     end
 
+    describe 'share certificates that no longer exist, in 1817 15528' do
+      # Shorts create and remove certificates, so moving a short changes the
+      # numbers of later ones. Without Player 3's NYSW short (action 1024),
+      # NYSW's later purchase names a certificate that is never created.
+      it 'explains it, suggests skipping or an equivalent, and lets the table move on' do
+        data = Engine.retcon_fixture('1817', '15528')
+        session = Retcon::Session.new(data)
+        short = session.actions.find { |a| a['id'] == 1024 }
+        expect(short.values_at('type', 'corporation')).to eq(%w[short NYSW])
+
+        result = session.delete(1024).replay
+        result = session.skip while result.broken? && result.kind != :missing_share &&
+                                    result.suggestion && result.suggestion['choice'] == 'skip'
+        expect(result.kind).to eq(:missing_share)
+        expect(result.error_message).to include('no longer exist')
+        expect(result.error_message).not_to include('undefined method')
+        expect(result.suggestion['choice']).to eq('skip')
+        expect(session.resolve_mode({
+                                      'entity' => result.broken_action['entity'],
+                                      'entity_type' => result.broken_action['entity_type'],
+                                    })).to eq(:replace)
+
+        equivalent = result.equivalent
+        expect(equivalent).not_to be_nil
+        expect(equivalent['shares'].all? { |id| result.game.share_by_id(id) }).to eq(true)
+
+        # Skipping moves on to a different action.
+        index = result.broken_index
+        skipped = session.skip
+        expect(skipped.broken_index != index || skipped.broken_action['type'] != 'buy_shares').to eq(true)
+      end
+    end
+
     describe 'a stock round that changes length' do
       # Player 3 (655) buys a share of A&A instead of passing, which in the
       # original game ended the stock round. Everyone now has to pass again
