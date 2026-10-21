@@ -1,0 +1,16 @@
+# Table mode: a private server for one game table, run on a laptop.
+# Layered on the development setup:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+#     -f docker-compose.table.yml up --build
+#
+# (or `make table_up`). Turns off the signup captcha, turns on Fix history
+# commits, and keeps browser logging quiet. Other devices on the same Wi-Fi
+# reach it at http://<laptop address>:9292.
+services:
+  rack:
+    environment:
+      TABLE_MODE: "true"
+  queue:
+    environment:
+      TABLE_MODE: "true"

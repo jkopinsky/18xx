@@ -30,13 +30,22 @@ class Api
           email = r.params['email']
           # Static blocklist first (free); fall through to the MX-backend check
           # (one DNS lookup) only if it passes, to catch rotating-domain providers.
-          if DisposableEmail.blocked?(email) || DisposableEmail.mx_blocked?(email)
+          # Not in table mode: a private table server is often offline, and
+          # players may use made-up addresses such as alice@table.local.
+          if !TABLE_MODE && (DisposableEmail.blocked?(email) || DisposableEmail.mx_blocked?(email))
             halt(400, 'Disposable email addresses are not allowed. Please use a permanent email address.')
           end
 
           user = User.new
           user.password = r.params['password'] unless r.params['password']&.strip&.empty?
           user.update_settings(r.params)
+
+          # A table server sends no email, so accounts work straight away.
+          if TABLE_MODE
+            user.save
+            next { flash_opts: { message: 'Account created! You can log in now.', color: 'lightgreen' } }
+          end
+
           user.settings['verified'] = false
           user.save
 

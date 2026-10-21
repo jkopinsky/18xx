@@ -32,6 +32,16 @@ dev_up : dev_link data_dir
 dev_up_b : dev_link data_dir
 	$(CONTAINER_COMPOSE) up --build
 
+# table mode: a private server for one game table (see TABLE_MODE.md)
+TABLE_COMPOSE = $(CONTAINER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.table.yml
+table_up : data_dir
+	$(TABLE_COMPOSE) up --build
+table_down :
+	$(TABLE_COMPOSE) down
+# make table_import FILE=table_games/mygame.json
+table_import :
+	$(TABLE_COMPOSE) exec rack bundle exec ruby scripts/import_table_game.rb $(FILE)
+
 # prod config, run locally
 prod_build : prod_link data_dir ensure_prod_env
 	$(CONTAINER_COMPOSE) build

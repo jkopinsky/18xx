@@ -5,9 +5,15 @@ RUN mkdir /18xx
 WORKDIR /18xx
 RUN git config --global --add safe.directory /18xx
 
+# esbuild for this machine's chip: x86 (most PCs) or arm64 (Apple Silicon
+# Macs), so the image builds natively on both.
 RUN if [ "$RACK_ENV" = "development" ]; \
     then \
-      curl -s https://registry.npmjs.org/esbuild-linux-64/-/esbuild-linux-64-0.14.36.tgz | tar xz; \
+      case "$(dpkg --print-architecture)" in \
+        arm64) pkg=esbuild-linux-arm64 ;; \
+        *) pkg=esbuild-linux-64 ;; \
+      esac; \
+      curl -sf "https://registry.npmjs.org/$pkg/-/$pkg-0.14.36.tgz" | tar xz; \
       mv package/bin/esbuild /usr/local/bin && rm -rf package; \
     fi;
 
