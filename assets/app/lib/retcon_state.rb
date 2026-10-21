@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'lib/storage'
+
 module Lib
   # The browser's side of a retcon: wraps an Engine::Retcon::Session and tracks
   # where the table is in the flow.
@@ -11,10 +13,17 @@ module Lib
   #                feed the move into the retcon instead of the live game
   #   :clean     - the corrected history replays to the end; preview and commit
   class RetconState
-    attr_reader :session, :status, :result, :display_game, :message, :base_action_count, :last_edit
+    # This device's master mode before the fix turned it on. Kept in storage,
+    # not just in memory, so a reload in the middle of a fix can put it back.
+    PREVIOUS_MASTER_MODE = 'retcon_previous_master_mode'
+
+    attr_reader :session, :status, :result, :display_game, :message, :base_action_count, :last_edit, :game_id
 
     def initialize(game_data, game)
       @game_data = game_data
+      # The game this fix belongs to. The fix lives in the app-wide store, so
+      # the game page checks this and drops the fix if another game is opened.
+      @game_id = game_data['id']
       @session = Engine::Retcon::Session.new(game_data, original_game: game)
       @base_action_count = (game_data['actions'] || []).size
       @status = :choosing
@@ -23,6 +32,31 @@ module Lib
       @message = nil
       @last_edit = nil
       @history = []
+    end
+
+    # Turns master mode on for the fix, remembering the previous setting.
+    def take_master_mode!
+      storage = Lib::Storage[@game_id] || {}
+      previous = storage.key?(PREVIOUS_MASTER_MODE) ? storage[PREVIOUS_MASTER_MODE] : storage['master_mode']
+      Lib::Storage[@game_id] = storage.merge('master_mode' => true, PREVIOUS_MASTER_MODE => previous || false)
+    end
+
+    # Puts master mode back the way it was before the fix.
+    def restore_master_mode!
+      RetconState.restore_master_mode(@game_id)
+    end
+
+    def self.restore_master_mode(game_id)
+      storage = Lib::Storage[game_id]
+      return if !storage || !storage.key?(PREVIOUS_MASTER_MODE)
+
+      restored = storage.dup
+      restored['master_mode'] = restored.delete(PREVIOUS_MASTER_MODE)
+      Lib::Storage[game_id] = restored
+    end
+
+    def for_game?(game_data)
+      game_data && game_data['id'].to_s == @game_id.to_s
     end
 
     def awaiting_move?

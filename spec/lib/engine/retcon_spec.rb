@@ -72,13 +72,12 @@ module Engine
         renumbered = result.changes.select { |c| c['kind'] == 'train_renumbered' }
         expect(renumbered.empty?).to eq(false)
         expect(result.broken?).to eq(true)
-        # Passes by companies whose turn the change already ended are dropped
-        # without asking; replay stops at the first action that really breaks.
-        expect(result.changes.count { |c| c['kind'] == 'stale_pass_dropped' }).to be > 0
-        expect(result.broken_action['type']).not_to eq('pass')
-        # Outside an operating round the app can't tell whose turn is still to
-        # come, so it offers both choices rather than advising a skip.
-        expect(%w[skip either]).to include(result.suggestion['choice'])
+        # In the merger round J now has a decision first; Belt's recorded pass
+        # is kept for its turn rather than dropped, and the table is asked
+        # for J's move.
+        expect(result.broken_action['type']).to eq('pass')
+        expect(result.game.current_entity.id).not_to eq(result.broken_action['entity'])
+        expect(result.suggestion['choice']).to eq('move')
       end
 
       it 'adds a move for a different entity before the broken action instead of replacing it' do
@@ -97,6 +96,65 @@ module Engine
         expect(session.actions[index]['entity'].to_s).to eq(current.id.to_s)
         expect(Retcon.comparable(Retcon.scrub(session.actions[index + 1])).except('auto_actions'))
           .to eq(Retcon.comparable(Retcon.scrub(broken)))
+      end
+    end
+
+    describe 'a stock round that changes length' do
+      # Player 3 (655) buys a share of A&A instead of passing, which in the
+      # original game ended the stock round. Everyone now has to pass again
+      # before the operating round begins.
+      it 'asks for the extra stock round moves instead of skipping the operating round (1817 15528)' do
+        data = Engine.retcon_fixture('1817', '15528')
+        session = Retcon::Session.new(data)
+        pass = session.actions.find { |a| a['id'] == 733 }
+        expect(pass.values_at('type', 'entity')).to eq(['pass', 655])
+        buy = {
+          'type' => 'buy_shares',
+          'entity' => 655,
+          'entity_type' => 'player',
+          'shares' => ['A&A_1'],
+          'percent' => 20,
+          'share_price' => 100,
+        }
+
+        result = session.replace(733, buy).replay
+        expect(result.broken?).to eq(true)
+        expect(Retcon.round_label(result.game.round)).to eq('SR')
+        expect(result.broken_action['type']).to eq('lay_tile')
+        expect(result.suggestion['choice']).to eq('move')
+        expect(result.suggestion['reason']).to include('still in the stock round')
+
+        # The table passes for each player the round now asks; the recorded
+        # operating round then follows, with nothing dropped on the way.
+        passes = 0
+        while result.broken? && Retcon.round_label(result.game.round) == 'SR' && passes < 8
+          player = result.game.current_entity
+          result = session.resolve({ 'type' => 'pass', 'entity' => player.id, 'entity_type' => 'player' })
+          passes += 1
+        end
+        expect(passes).to be_between(1, 7)
+        expect(Retcon.round_label(result.game.round)).not_to eq('SR')
+        expect(result.changes.none? { |c| c['kind'] == 'stale_pass_dropped' }).to eq(true)
+      end
+
+      it 'keeps the recorded passes when the order of play shifts (1844 160062)' do
+        data = Engine.retcon_fixture('1844', '160062')
+        session = Retcon::Session.new(data)
+        acts = session.actions
+        last = acts.index { |a| a['id'] == 824 }
+        target = acts[last - 3]
+        expect(target['type']).to eq('pass')
+
+        result = session.delete(target['id']).replay
+        expect(result.broken?).to eq(true)
+        expect(result.changes.none? { |c| c['kind'] == 'stale_pass_dropped' }).to eq(true)
+        expect(result.broken_action['type']).to eq('pass')
+        expect(result.suggestion['choice']).to eq('move')
+
+        player = result.game.current_entity
+        result = session.resolve({ 'type' => 'pass', 'entity' => player.id, 'entity_type' => 'player' })
+        expect(result.clean?).to eq(true)
+        expect(result.changes.none? { |c| c['kind'] == 'stale_pass_dropped' }).to eq(true)
       end
     end
 

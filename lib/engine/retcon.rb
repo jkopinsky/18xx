@@ -39,6 +39,32 @@ module Engine
       klass.name.to_s.split('::').last.gsub(/([a-z])([A-Z])/, '\\1 \\2')
     end
 
+    # "Engine::Round::Stock" => "the stock round"
+    def round_title(klass)
+      name = klass.name.to_s.split('::').last.gsub(/([a-z])([A-Z])/, '\\1 \\2').downcase
+      name = "#{name} round" unless name.end_with?('round')
+      "the #{name}"
+    end
+
+    # Where a recorded action's round stands compared with the round now
+    # being played, from its step note:
+    #   :over    - its round has ended (a different kind of round is on now)
+    #   :later   - its round has not started yet (this round runs longer
+    #              than it did in the original game)
+    #   :current - the same round, or nothing to go on
+    def recorded_round(game, tag)
+      return :current if !tag || !tag[3]
+
+      now = game.round_history.size
+      return :current if tag[3] == now && tag[0] == game.round.class
+      return :later if tag[3] >= now
+      # An earlier round of the same kind (two operating rounds in a row):
+      # let the turn order decide.
+      return :current if tag[0] == game.round.class
+
+      :over
+    end
+
     # Where an entity stands in the current operating round's order:
     #   :over     - it has already operated this round
     #   :upcoming - it operates later this round
@@ -203,8 +229,10 @@ module Engine
     class Result
       attr_reader :status, :game, :broken_index, :broken_action, :error, :changes, :kind
 
-      def initialize(status:, game:, broken_index: nil, broken_action: nil, error: nil, changes: [], kind: nil)
+      def initialize(status:, game:, broken_index: nil, broken_action: nil, error: nil, changes: [], kind: nil,
+                     recorded_step: nil)
         @kind = kind
+        @recorded_step = recorded_step
         @status = status
         @game = game
         @broken_index = broken_index
@@ -241,6 +269,27 @@ module Engine
         return nil unless current
         return same_entity_suggestion(current) if current.id.to_s == @broken_action['entity'].to_s
 
+        case Retcon.recorded_round(@game, @recorded_step)
+        when :over
+          return {
+            'choice' => 'skip',
+            'reason' => "This was recorded in #{Retcon.round_title(@recorded_step[0])}, which is already over " \
+                        "(the game is in #{Retcon.round_title(@game.round.class)} now), so it can no longer " \
+                        'happen. Skip it, then check the preview, since it may have moved money or shares in ' \
+                        'the original game.',
+          }
+        when :later
+          # Recorded in a round still to come: the round in play needs moves
+          # the original game didn't have (a stock round running longer, say).
+          return {
+            'choice' => 'move',
+            'reason' => "This was recorded in #{Retcon.round_title(@recorded_step[0])}, but the game is still in " \
+                        "#{Retcon.round_title(@game.round.class)}: the change means this round needs more moves " \
+                        "first (for example everyone passing again). Make them, starting with #{current.name}; " \
+                        "the recorded actions are tried again afterwards. Don't skip it.",
+          }
+        end
+
         case Retcon.turn_status(@game, @broken_action['entity'])
         when :upcoming
           # The company now operating has a decision the original game did not
@@ -273,12 +322,15 @@ module Engine
             }
           end
         else
+          # The same kind of round, but not an operating round (a stock round,
+          # an auction): the order of play shifted, so this is usually a move
+          # still to come.
           {
-            'choice' => 'either',
-            'reason' => "It is #{current.name}'s turn now, not #{actor_name}'s. If #{current.name} has a " \
-                        "decision here#{step_note} that the original game did not have, make it first; this " \
-                        "action is tried again afterwards. If #{actor_name} really can no longer " \
-                        "#{action_words}, skip it and check the preview.",
+            'choice' => 'move',
+            'reason' => "It is #{current.name}'s turn now, not #{actor_name}'s: after the change the order of " \
+                        "play is different. Make #{current.name}'s move#{step_note}; #{actor_name}'s recorded " \
+                        "#{action_words} is tried again afterwards. Only if #{actor_name} can no longer act in " \
+                        'this round at all, skip it and check the preview.',
           }
         end
       end
@@ -609,7 +661,8 @@ module Engine
             @broken_kind = :new_decision
             @broken_game = game
             return Result.new(status: :broken, game: game, broken_index: i, kind: :new_decision,
-                              broken_action: attempt, error: verdict, changes: @changes)
+                              broken_action: attempt, error: verdict, changes: @changes,
+                              recorded_step: stored[STEP_TAG])
           end
 
           game.process_action(attempt, add_auto_actions: true)
@@ -626,7 +679,7 @@ module Engine
             start = i
             game = load(@actions[0...i])
 
-            if stale_pass?(game, attempt)
+            if stale_pass?(game, attempt, stored)
               drop_pass(game, i, attempt, 'its turn had already ended')
               next
             end
@@ -638,7 +691,8 @@ module Engine
               @broken_kind = :rejected
               @broken_game = game
               return Result.new(status: :broken, game: game, broken_index: i, kind: :rejected,
-                                broken_action: attempt, error: error, changes: @changes)
+                                broken_action: attempt, error: error, changes: @changes,
+                                recorded_step: stored[STEP_TAG])
             end
           end
 
@@ -660,16 +714,21 @@ module Engine
       # its turn early (it can no longer afford a train, say), so the pass that
       # ended its turn in the original game has nothing left to do. A pass
       # moves no money or holdings, so it is dropped without asking.
-      def stale_pass?(game, attempt)
+      def stale_pass?(game, attempt, stored)
         return false unless attempt['type'] == 'pass'
 
         active = game.round.active_entities.map { |e| e.id.to_s }
         return false if active.empty? || active.include?(attempt['entity'].to_s)
 
-        # In an operating round, only once its turn is over: a pass by a
-        # company whose turn is still to come is a real decision, kept for
-        # when its turn arrives.
-        Retcon.turn_status(game, attempt['entity']) != :upcoming
+        # Only a company that has already operated in this operating round.
+        # Anywhere else (a stock round that now runs longer, a pass recorded
+        # for the next round) the pass is a real decision still to come, so
+        # it is kept and the table is asked.
+        case Retcon.recorded_round(game, stored[STEP_TAG])
+        when :over then true # it answered a decision in a round that has ended
+        when :later then false
+        else Retcon.turn_status(game, attempt['entity']) == :over
+        end
       end
 
       def drop_pass(game, index, attempt, reason)

@@ -106,6 +106,8 @@ module View
     def render
       @pin = @game_data.dig('settings', 'pin')
 
+      drop_fix_for_other_game
+
       if (retcon_game = retcon_display_game)
         # Fixing history: show the draft game (at the point a move is needed,
         # or the corrected game while previewing), not the live one.
@@ -277,6 +279,23 @@ module View
       true
     end
 
+    # A fix lives in the app-wide store, so opening another game without a
+    # page reload (Back, then another game from the list) would otherwise
+    # show and commit the first game's draft there. Drop it instead, and put
+    # master mode back for the game it belonged to.
+    def drop_fix_for_other_game
+      return if !@retcon || !@game_data || @retcon.for_game?(@game_data)
+
+      @retcon.restore_master_mode!
+      store(:retcon, nil, skip: true)
+      if @game && @game.id.to_s == @retcon.game_id.to_s
+        @game = nil
+        store(:game, nil, skip: true)
+      end
+      store(:flash_opts, 'The history fix you had open in another game was cancelled when you left it.', skip: true)
+      @retcon = nil
+    end
+
     # A fix turns master mode on for this device and puts it back when it
     # ends. If the page was reloaded in the middle of a fix, the fix is gone
     # but master mode would stay on; put it back the first time the game
@@ -290,13 +309,7 @@ module View
       return if checked[@game.id] || @game_data[:mode] == :hotseat
 
       checked[@game.id] = true
-      storage = Lib::Storage[@game.id]
-      key = Game::FixHistory::PREVIOUS_MASTER_MODE
-      return if !storage || !storage.key?(key)
-
-      restored = storage.dup
-      restored['master_mode'] = restored.delete(key)
-      Lib::Storage[@game.id] = restored
+      Lib::RetconState.restore_master_mode(@game.id)
     end
 
     def retcon_display_game

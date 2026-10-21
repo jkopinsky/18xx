@@ -81,16 +81,8 @@ module View
         ])
       end
 
-      # Remembers this device's master mode while a fix is open. It is kept in
-      # storage, not just in memory, so a reload in the middle of a fix can put
-      # it back (see GamePage#restore_master_mode_after_reload).
-      PREVIOUS_MASTER_MODE = 'retcon_previous_master_mode'
-
       def begin_retcon(state)
-        @game_storage = Lib::Storage[@game.id] || {}
-        previous = @game_storage.key?(PREVIOUS_MASTER_MODE) ? @game_storage[PREVIOUS_MASTER_MODE] : @game_storage['master_mode']
-        state.instance_variable_set(:@previous_master_mode, previous)
-        Lib::Storage[@game.id] = @game_storage.merge('master_mode' => true, PREVIOUS_MASTER_MODE => previous || false)
+        state.take_master_mode!
         yield
         store(:retcon, state, skip: true)
         if state.awaiting_move?
@@ -181,6 +173,9 @@ module View
       end
 
       def commit
+        # Never write one game's fixed history into another.
+        return finish(@game_data, 'That fix belonged to another game, so it was discarded.') unless @retcon.for_game?(@game_data)
+
         actions = @retcon.session.actions
         if hotseat?
           @game_data['actions'] = actions
@@ -222,7 +217,9 @@ module View
         user = @user
         connection.get(GameManager.url(game_data)) do |data|
           next if data['error'] || store['retcon']
-          next if (data['actions'] || []).size == (store['game_data']['actions'] || []).size
+          # Compare the actions themselves: a fix committed elsewhere can keep
+          # the same number of actions while changing what they say.
+          next if (data['actions'] || []) == (store['game_data']['actions'] || [])
 
           store(:game_data, data, skip: true)
           store(:game, Engine::Game.load(data, user: user&.dig('id')))
@@ -243,9 +240,7 @@ module View
       end
 
       def restore_master_mode
-        storage = (Lib::Storage[@game.id] || {}).dup
-        storage.delete(PREVIOUS_MASTER_MODE)
-        Lib::Storage[@game.id] = storage.merge('master_mode' => @retcon.instance_variable_get(:@previous_master_mode))
+        @retcon.restore_master_mode!
       end
 
       def act

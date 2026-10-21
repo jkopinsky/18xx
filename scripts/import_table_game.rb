@@ -42,9 +42,23 @@ def local_name(name)
 end
 
 id_map = {}
+taken = {}
 users = players.map do |p|
   name = local_name(p['name'])
-  email = "#{name.downcase.gsub(/[^a-z0-9]/, '')}@table.local"
+  name = "Player #{players.index(p) + 1}" if name.empty?
+  base = name.downcase.gsub(/[^a-z0-9]/, '')
+  base = "player#{players.index(p) + 1}" if base.empty?
+  # Two names can reduce to the same account ("Bob!" and "Bob?"); give each
+  # seat its own account, numbering the later ones.
+  key = base
+  n = 1
+  while taken[key]
+    n += 1
+    key = "#{base}#{n}"
+  end
+  taken[key] = true
+  name = "#{name} #{n}" if n > 1
+  email = "#{key}@table.local"
   # Local table seats: no email notifications, and privacy consent recorded so
   # the site doesn't stop each player at the consent page.
   user = User.where(email: email).first ||
