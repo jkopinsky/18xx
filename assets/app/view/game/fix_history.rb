@@ -15,9 +15,6 @@ module View
       include Actionable
 
       needs :retcon, default: nil, store: true
-      needs :fix_history_shown, default: 40, store: true
-
-      PAGE = 40
 
       def render
         body =
@@ -43,9 +40,9 @@ module View
 
         actions = session.original_actions
         indexes = (0...actions.size).to_a.reverse.reject { |i| actions[i]['type'] == 'message' }
-        shown = indexes.first(@fix_history_shown)
-
-        trs = shown.map do |index|
+        # Every action is on the page, so the browser's find (Ctrl+F) reaches
+        # all of them.
+        trs = indexes.map do |index|
           action = actions[index]
           source_id = session.source_ids[index]
           lines = log_by_id[source_id] || []
@@ -61,23 +58,16 @@ module View
           ])
         end
 
-        more = []
-        if indexes.size > shown.size
-          more << h(:button, { on: { click: -> { store(:fix_history_shown, @fix_history_shown + PAGE) } } },
-                    "Show #{[PAGE, indexes.size - shown.size].min} older")
-        end
-
         h(:div, [
           h(:p, [
             'Pick the action to fix. Nothing changes in the live game until you commit. ',
             'After an edit, the rest of the game replays under the rules; if a later action no longer works ',
-            'you will be asked for a new move at that point.',
+            'you will be asked for a new move at that point. Newest first; use your browser\'s find (Ctrl+F) to search.',
           ]),
           h(:table, { style: { borderCollapse: 'collapse' } }, [
             h(:thead, [h(:tr, ['#', 'What happened', 'Fix'].map { |t| h(:th, { style: cell }, t) })]),
             h(:tbody, trs),
           ]),
-          *more,
         ])
       end
 
