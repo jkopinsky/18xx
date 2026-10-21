@@ -96,6 +96,25 @@ make table_up
 
 ## If something goes wrong
 
+- **`xcrun: error: invalid active developer path` on a Mac:** the Mac's command
+  line tools (which provide `make`) are missing or were removed by a macOS
+  update. Run `xcode-select --install`, finish the installer, and try again.
+  If it says they're already installed, run
+  `sudo rm -rf /Library/Developer/CommandLineTools` and then
+  `xcode-select --install`.
+- **Running without `make`:** from the `18xx` folder, run
+  `mkdir -p db/data && chmod 700 db/data` once, then start the server with
+
+  ```
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.table.yml up --build
+  ```
+
+  and import a game (with the server running) with
+
+  ```
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.table.yml exec rack bundle exec ruby scripts/import_table_game.rb table_games/<file name>.json
+  ```
+
 - **A fix went wrong after it was committed:** every commit first saves the
   previous history in `db/retcon_backups/`. To go back to one, import that file
   as a new game with `make table_import FILE=db/retcon_backups/<file>.json`.
