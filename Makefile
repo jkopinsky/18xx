@@ -34,8 +34,11 @@ dev_up_b : dev_link data_dir
 
 # table mode: a private server for one game table (see TABLE_MODE.md)
 TABLE_COMPOSE = $(CONTAINER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.table.yml
+# The web and queue services share one image; build it once, then start both
+# (building both at once can collide on the image name with newer Docker).
 table_up : data_dir
-	$(TABLE_COMPOSE) up --build
+	$(TABLE_COMPOSE) build rack
+	$(TABLE_COMPOSE) up
 table_down :
 	$(TABLE_COMPOSE) down
 # make table_import FILE=table_games/mygame.json

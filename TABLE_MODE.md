@@ -120,7 +120,8 @@ make table_up
   `mkdir -p db/data && chmod 700 db/data` once, then start the server with
 
   ```
-  docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.table.yml up --build
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.table.yml build rack
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.table.yml up
   ```
 
   and import a game (with the server running) with
@@ -134,6 +135,9 @@ make table_up
   as a new game with `make table_import FILE=db/retcon_backups/<file>.json`.
 - **`make table_up` fails on a Mac with an Apple chip:** make sure Docker Desktop
   is up to date. The image picks the right build for the chip on its own.
+- **`failed to solve: image "docker.io/library/18xx_rack:dev": already exists`:**
+  two services built the same image at once. Update (`git pull`) and run
+  `make table_up` again; it now builds the image once before starting.
 - **Other devices can't connect:** check they are on the same Wi-Fi, that you
   used the laptop's address (not `localhost`), and that the firewall allows the
   connection.
