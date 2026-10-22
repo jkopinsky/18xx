@@ -9,11 +9,15 @@ listen 9292
 worker_processes PRODUCTION ? 4 : 1
 # A table server compiles the whole app on the first page load after each
 # start, which takes several minutes on a slower laptop; don't cut it off.
-timeout if PRODUCTION
-  15
-else
-  (ENV['TABLE_MODE'] == 'true' ? 900 : 60)
-end
+request_timeout =
+  if PRODUCTION
+    15
+  elsif ENV['TABLE_MODE'] == 'true'
+    900
+  else
+    60
+  end
+timeout request_timeout
 preload_app true
 
 before_fork do |_server, _worker|
