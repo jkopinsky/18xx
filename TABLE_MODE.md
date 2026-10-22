@@ -96,6 +96,20 @@ make table_up
 
 ## If something goes wrong
 
+- **Docker Desktop says it requires a newer macOS:** current versions need
+  macOS 14 or later. For macOS 12 (Monterey), people report that Docker
+  Desktop 4.41.2 is the last version that runs. Install it from Docker's
+  download server (build 191736):
+  - Apple chip (About This Mac shows "Chip: Apple M…"):
+    <https://desktop.docker.com/mac/main/arm64/191736/Docker.dmg>
+  - Intel chip (About This Mac shows "Processor: … Intel"):
+    <https://desktop.docker.com/mac/main/amd64/191736/Docker.dmg>
+
+  When it later offers an update, decline it (or turn off automatic updates in
+  its settings): the update won't run on macOS 12. Docker removes old
+  downloads over time; if the link stops working, a slightly older 4.x build
+  also works for this.
+
 - **`xcrun: error: invalid active developer path` on a Mac:** the Mac's command
   line tools (which provide `make`) are missing or were removed by a macOS
   update. Run `xcode-select --install`, finish the installer, and try again.
