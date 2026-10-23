@@ -42,10 +42,16 @@ make table_up
 ```
 
 The first start downloads and builds everything, which takes a while (often
-10 to 20 minutes). Later starts take about a minute. The server is ready when
-the log shows a line like `listening on addr=0.0.0.0:9292`. The first page you
-open after each start can take a few minutes while the app compiles; after
-that, pages open normally.
+10 to 20 minutes). Later starts take about a minute. Right after starting, the
+server compiles the app in the background (several minutes the first time,
+much less afterwards) and then prints:
+
+```
+Table server ready: open http://localhost:9292 ...
+```
+
+Pages open quickly from then on. You can open a page before that line appears;
+it just waits until compiling is done.
 
 - **On the laptop:** open <http://localhost:9292>.
 - **On other devices:** open `http://<laptop's address>:9292`, for example

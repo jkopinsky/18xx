@@ -11,6 +11,12 @@ services:
   rack:
     environment:
       TABLE_MODE: "true"
+    # The development command, plus a background warm-up that compiles the
+    # app as soon as the server is up and prints "Table server ready".
+    command: >-
+      sh -c "bundle exec rake dev_up &&
+      (sh scripts/table_warmup.sh &) &&
+      bundle exec rerun --background -i 'build/*' -i 'public/*' 'unicorn -c config/unicorn.rb'"
   queue:
     environment:
       TABLE_MODE: "true"
