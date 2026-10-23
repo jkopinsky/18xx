@@ -308,7 +308,16 @@ class Api < Roda
     @user_resolved = true
     @user = session&.valid? ? session.user : nil
     @user = nil if @user && banned?(@user)
+    @user ||= table_mode_visitor if TABLE_MODE
     @user
+  end
+
+  # Table mode: nobody has to log in. A device without a session is signed in
+  # as the shared Table account, which can watch and play every game.
+  def table_mode_visitor
+    visitor = TableAccounts.table_user
+    issue_session(visitor)
+    visitor
   end
 
   # A ban must take effect on the very next request, not just at login: an

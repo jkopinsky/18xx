@@ -4,12 +4,12 @@
 # fixture) into the local database, so it can be opened and continued on a
 # local server.
 #
-# Each player in the file gets a local account (created if missing) named after
-# them, with the email <name>@table.local and the password given (default
-# "password"). Player ids inside the actions are rewritten to the local ids.
+# Each player in the file gets a seat account named after them (reused if one
+# exists). Nobody logs in as these: on a table server every device can play
+# for anyone. Player ids inside the actions are rewritten to the local ids.
 #
 # Usage:
-#   bundle exec ruby scripts/import_table_game.rb path/to/game.json [password] [--actions N]
+#   bundle exec ruby scripts/import_table_game.rb path/to/game.json [--actions N]
 #
 # --actions N imports only the first N actions (after undo/redo are resolved),
 # leaving the game in progress at that point.
@@ -22,6 +22,7 @@ require_relative '../models'
 require 'require_all'
 require_rel '../models'
 require_relative '../lib/engine'
+require_relative '../lib/table_accounts'
 
 args = ARGV.dup
 limit = nil
@@ -29,45 +30,21 @@ if (flag = args.index('--actions'))
   limit = Integer(args[flag + 1])
   args.slice!(flag, 2)
 end
-path = args[0] or abort('usage: import_table_game.rb game.json [password] [--actions N]')
-password = args[1] || 'password'
+path = args[0] or abort('usage: import_table_game.rb game.json [--actions N]')
 data = JSON.parse(File.read(path))
 data['actions'] = Engine::Retcon.flatten(data['actions'] || [])
 data['actions'] = data['actions'].first(limit) if limit
 
 players = data['players'] || abort('no players in file')
 
-def local_name(name)
-  name.to_s.strip.gsub(/[^A-Za-z0-9_ -]/, '').squeeze(' ')[0, 30]
-end
-
+# One seat account per player (see lib/table_accounts.rb). Nobody logs in as
+# them: on a table server every device can play for anyone.
+users = TableAccounts.seat_users(players.map { |p| p['name'] })
 id_map = {}
-taken = {}
-users = players.map do |p|
-  name = local_name(p['name'])
-  name = "Player #{players.index(p) + 1}" if name.empty?
-  base = name.downcase.gsub(/[^a-z0-9]/, '')
-  base = "player#{players.index(p) + 1}" if base.empty?
-  # Two names can reduce to the same account ("Bob!" and "Bob?"); give each
-  # seat its own account, numbering the later ones.
-  key = base
-  n = 1
-  while taken[key]
-    n += 1
-    key = "#{base}#{n}"
-  end
-  taken[key] = true
-  name = "#{name} #{n}" if n > 1
-  email = "#{key}@table.local"
-  # Local table seats: no email notifications, and privacy consent recorded so
-  # the site doesn't stop each player at the consent page.
-  user = User.where(email: email).first ||
-         User.create(name: name, email: email, password: password,
-                     settings: Sequel.pg_jsonb_wrap('consent' => true, 'notifications' => 'none'))
+players.zip(users).each do |p, user|
   id_map[p['id']] = user.id
   id_map[p['id'].to_s] = user.id
   id_map[p['name']] = user.id
-  user
 end
 
 remap = lambda do |obj|
@@ -95,7 +72,7 @@ settings['auto_routing'] = true unless settings.key?('auto_routing')
 
 DB.transaction do
   game = Game.create(
-    user_id: users.first.id,
+    user_id: TableAccounts.table_user.id,
     description: "Imported: #{data['description'] || File.basename(path)}",
     title: data['title'],
     max_players: data['max_players'] || players.size,

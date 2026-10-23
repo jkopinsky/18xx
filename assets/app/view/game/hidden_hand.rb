@@ -25,8 +25,8 @@ module View
         master_mode = Lib::Storage[@game.id]&.dig('master_mode')
         user_in_master_mode = user_in_game && master_mode && current_entity_is_this_player
 
-        @show_button = user_is_this_player || (current_entity_is_this_player && hotseat?)
-        @can_use_button = user_is_this_player || user_in_master_mode || hotseat?
+        @show_button = user_is_this_player || (current_entity_is_this_player && (hotseat? || Lib::TableMode.on?))
+        @can_use_button = user_is_this_player || user_in_master_mode || hotseat? || Lib::TableMode.on?
 
         children = []
         children << render_show_button if @show_button

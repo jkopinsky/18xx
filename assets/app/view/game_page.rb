@@ -650,7 +650,7 @@ module View
     end
 
     def hotseat_or_master
-      @game_data[:mode] == :hotseat || Lib::Storage[@game.id]&.dig('master_mode')
+      @game_data[:mode] == :hotseat || Lib::TableMode.on? || Lib::Storage[@game.id]&.dig('master_mode')
     end
 
     def render_game

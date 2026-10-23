@@ -7,6 +7,7 @@ require 'index'
 require 'game_manager'
 require 'user_manager'
 require 'lib/connection'
+require 'lib/table_mode'
 require 'lib/params'
 require 'lib/settings'
 require 'lib/storage'
@@ -40,6 +41,7 @@ class App < Snabberb::Component
 
   def render
     setup_logger
+    Lib::TableMode.on = @table_mode
 
     props = {
       props: { id: 'app' },

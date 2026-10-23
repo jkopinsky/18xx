@@ -506,7 +506,7 @@ module View
           user_in_game = !hotseat? && user_name && @game.players.map(&:name).include?(user_name)
           user_is_this_player = !hotseat? && @user&.dig('name') == @current_entity.name
           user_in_master_mode = user_in_game && Lib::Storage[@game.id]&.dig('master_mode')
-          can_show_hand = user_is_this_player || user_in_master_mode || hotseat?
+          can_show_hand = user_is_this_player || user_in_master_mode || hotseat? || Lib::TableMode.on?
 
           toggle = lambda do
             if can_show_hand

@@ -60,7 +60,9 @@ class Api
             game.to_h
           end
 
-          not_authorized! if users.none? { |u| u.id == user.id } && game.user_id != user.id
+          # In table mode anyone on the table's server may play any game (the
+          # Table account, or any account, moving for whichever seat is up).
+          not_authorized! if !TABLE_MODE && users.none? { |u| u.id == user.id } && game.user_id != user.id
 
           # POST '/api/game/<game_id>/action'
           r.is 'action' do
@@ -72,7 +74,8 @@ class Api
 
             # A message's entity must be the sender's own id; only the game owner
             # may act for others (hotseat / master mode).
-            if r.params['type'] == 'message' &&
+            if !TABLE_MODE &&
+               r.params['type'] == 'message' &&
                r.params['entity'].to_i != user.id &&
                game.user_id != user.id
               halt(403, 'You can only send messages as yourself')
@@ -129,7 +132,7 @@ class Api
                 engine = Engine::Game.load(game, actions: actions_h(game))
                 prev = acting_users(engine, users)
 
-                r.params['user'] = user.id
+                r.params['user'] = credited_user_id(engine, r.params, user)
 
                 engine = engine.process_action(r.params, validate_auto_actions: true)
                 halt(500, "Illegal action: #{engine.exception}") if engine.exception
@@ -137,7 +140,7 @@ class Api
 
                 Action.create(
                   game: game,
-                  user: user,
+                  user_id: r.params['user'],
                   action_id: action['id'],
                   action: action.dup,
                 )
@@ -285,8 +288,69 @@ class Api
           GameUser.create(game: game, user: user)
           game.to_h
         end
+
+        # POST '/api/game/table'
+        # Table mode: a game played at one table, like hotseat but stored on
+        # the server so any device can open it. Takes the players' names; the
+        # game starts at once, with nobody needing to join or log in.
+        r.is 'table' do
+          halt(403, 'Table games are only available in table mode') unless TABLE_MODE
+
+          title = r.params['title']
+          halt(400, 'Unknown game') unless Engine::GAME_TITLES.include?(title)
+
+          names = Array(r.params['players']).map(&:to_s).map(&:strip).reject(&:empty?)
+          range = Engine.game_by_title(title)::PLAYER_RANGE
+          halt(400, "#{title} takes #{range.first} to #{range.last} players") unless names.size.between?(*range)
+
+          seed = r.params['seed'] && Integer(r.params['seed'], exception: false)
+          seats = TableAccounts.seat_users(names)
+          description = r.params['description'].to_s.strip
+          description = "Table game: #{seats.map(&:name).join(', ')}" if description.empty?
+
+          game = nil
+          DB.transaction do
+            game = Game.create(
+              user: user,
+              description: description,
+              min_players: seats.size,
+              max_players: seats.size,
+              settings: {
+                seed: (seed || Random.new_seed) % (2**31),
+                player_order: seats.map(&:id),
+                unlisted: false,
+                optional_rules: r.params['optional_rules'],
+                auto_routing: true,
+                is_async: false,
+                table_game: true,
+              },
+              title: title,
+              round: 'Unstarted',
+              status: 'active',
+            )
+            seats.each { |seat| GameUser.create(game: game, user: seat) }
+            game.refresh
+            set_game_state(game, Engine::Game.load(game, actions: []), game.ordered_players)
+          end
+
+          game.to_h
+        end
       end
     end
+  end
+
+  # Who an action is credited to in the game log. Normally the account that
+  # sent it. In table mode, the player whose seat (or company) acted: the
+  # devices at the table move for whoever is up, and crediting the device
+  # would mark every move "via Master Mode".
+  def credited_user_id(engine, params, user)
+    return user.id unless TABLE_MODE
+
+    entity = engine.get(params['entity_type'], params['entity'])
+    actor = engine.acting_for_player(entity&.player)&.id
+    actor.is_a?(Integer) ? actor : user.id
+  rescue StandardError
+    user.id
   end
 
   def actions_h(game)

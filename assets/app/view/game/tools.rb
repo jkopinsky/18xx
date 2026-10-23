@@ -38,6 +38,10 @@ module View
       end
 
       def master_mode
+        if Lib::TableMode.on?
+          return h('div.margined', h(:label, 'At this table every device can move for anyone; no master mode needed.'))
+        end
+
         mode = @settings[:master_mode] || false
         toggle = lambda do
           Lib::Storage[@game.id] = @settings.merge('master_mode' => !mode)

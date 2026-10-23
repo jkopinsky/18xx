@@ -36,6 +36,9 @@ module View
 
       def participant?
         return @participant if defined?(@participant)
+        # At a table server every device takes part (signed in as the Table
+        # account if nobody logged in).
+        return @participant = true if Lib::TableMode.on? && @user
 
         @participant = (@game.players.map(&:id) + [@game_data['user']['id']]).include?(@user&.dig('id'))
       end
@@ -91,6 +94,7 @@ module View
         end
 
         if !hotseat? &&
+           !Lib::TableMode.on? &&
            !action.free? &&
            participant? &&
            !valid_actor?(action)

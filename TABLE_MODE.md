@@ -6,8 +6,12 @@ opens it in a browser on their own phone, tablet or laptop over the same Wi-Fi.
 
 What table mode changes from the public site:
 
-- Signing up needs no captcha and no email confirmation, and any address works
-  (`alice@table.local` is fine). Accounts work straight away.
+- Nobody needs to log in. A device that opens the site is signed in as the
+  shared **Table** account automatically, and can watch or play any game.
+- **Table games** work like hotseat (you type in the players' names and the
+  game starts straight away; any device can move for anyone), but the game is
+  kept on the server, so any number of phones, tablets and laptops can open it
+  at once, or none besides the laptop.
 - Fix history can commit corrected histories for everyone. The previous history
   is saved to `db/retcon_backups/` first.
 - It can't run with the production settings, so it can't be switched on for
@@ -66,12 +70,18 @@ the next time you start it.
 
 ## Playing a new game
 
-1. Everyone opens the site and chooses **Sign Up**, then agrees to the privacy
-   notice the first time they log in.
-2. One person chooses **Create New Game**, picks 1817 or 1844, ticks
-   **Auto Routing**, and creates it.
-3. The others find it on their home page and press **Join**; the creator
-   presses **Start**.
+1. On the laptop, choose **Create New Game**, pick 1817 or 1844, leave
+   **Table game** selected, type the players' names, and press **Create**. The
+   game opens straight away (auto routing is on).
+2. Play on the laptop as you would in hotseat: whoever is up, make their move.
+3. Anyone who wants to follow along on their phone opens
+   `http://<laptop's address>:9292`, picks the game from the home page, and
+   can look at the Ledger, Holdings or map, or make a move. Moves appear on
+   every open device within a second or two.
+
+The game log credits each move to the player (or company's president) who was
+up, whichever device made it. Signing up for an account is still possible but
+never needed.
 
 ## Continuing a game from 18xx.games
 
@@ -86,11 +96,8 @@ the next time you start it.
 
    It prints the new game's number; open `http://<address>:9292/game/<number>`.
 
-Each player in the file gets a local account named after them, with the email
-`<name>@table.local` (letters and digits only, lower case) and the password
-`password`. Players log in with those and can change the password on their
-profile page. Add `--actions N` after the file name to import only the first N
-actions.
+It becomes a table game like any other: every device can open and play it.
+Add `--actions N` after the file name to import only the first N actions.
 
 ## Updating
 

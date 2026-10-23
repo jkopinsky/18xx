@@ -3,6 +3,7 @@
 # backtick_javascript: true
 
 require 'game_manager'
+require 'lib/table_mode'
 require 'lib/whats_this'
 require 'view/form'
 
@@ -42,6 +43,11 @@ module View
 
     def render_content
       @label_style = { display: 'block' }
+      # A table server offers table games instead of games players join.
+      if Lib::TableMode.on? && @mode == :multi
+        @mode = :table
+        store(:mode, :table, skip: true)
+      end
 
       inputs = [mode_selector]
 
@@ -92,7 +98,11 @@ module View
                 attrs: { checked: setting_for(:auto_routing) == true },
               )
             end
-          when :hotseat
+          when :hotseat, :table
+            if @mode == :table
+              inputs << h(:p, 'Played at one table: any device can open the game from the home page and move for ' \
+                              'anyone. Nobody needs to log in or join.')
+            end
             inputs << h(:label, { style: @label_style }, 'Player Names')
             (1..(@max_players || @max_p[selected_game_or_variant.title])).each do |n|
               inputs << render_input('', id: "player_#{n}", attrs: { value: "Player #{n}" })
@@ -139,13 +149,13 @@ module View
             value: @min_players || @min_p[title],
             required: true,
           },
-          container_style: @mode == :hotseat ? { display: 'none' } : {},
+          container_style: named_players? ? { display: 'none' } : {},
           input_style: { width: '3.5rem' },
           label_style: @label_style,
           on: { input: -> { update_inputs } },
         ),
         render_input(
-          @mode == :hotseat ? 'Players' : "Max Players (#{game_max_players})",
+          named_players? ? 'Players' : "Max Players (#{game_max_players})",
           id: :max_players,
           type: :number,
           attrs: {
@@ -374,11 +384,26 @@ module View
     end
 
     def mode_selector
-      h(:div, { style: { margin: '1rem 0' } }, [
-        *mode_input(:multi, 'Multiplayer'),
-        *mode_input(:hotseat, 'Hotseat'),
-        *mode_input(:json, 'Import hotseat game'),
-      ])
+      modes =
+        if Lib::TableMode.on?
+          [
+            *mode_input(:table, 'Table game (any device can open it)'),
+            *mode_input(:hotseat, 'Hotseat (this device only)'),
+            *mode_input(:json, 'Import hotseat game'),
+          ]
+        else
+          [
+            *mode_input(:multi, 'Multiplayer'),
+            *mode_input(:hotseat, 'Hotseat'),
+            *mode_input(:json, 'Import hotseat game'),
+          ]
+        end
+      h(:div, { style: { margin: '1rem 0' } }, modes)
+    end
+
+    # Games set up with a list of player names rather than players joining.
+    def named_players?
+      %i[hotseat table].include?(@mode)
     end
 
     def mode_input(mode, text)
@@ -449,7 +474,7 @@ module View
         game_params[:seed] = nil if (game_params[:seed]).zero?
         return create_game(game_params)
 
-      when :hotseat
+      when :hotseat, :table
         game_data = {
           settings: {
             optional_rules: game_params[:optional_rules] || [],
@@ -472,6 +497,7 @@ module View
       .map { |_, name| name.gsub(/\s+/, ' ').strip }
 
       return store(:flash_opts, 'Cannot have duplicate player names') if players.uniq.size != players.size
+      return create_table_game(game_params, players) if @mode == :table
 
       checked_options = Engine.meta_by_title(game_data[:title])
                           .check_options(game_data[:settings][:optional_rules],
@@ -489,6 +515,22 @@ module View
         max_players: game_params[:max_players],
         **game_data,
       )
+    end
+
+    # A table game is stored on the server; open it straight away.
+    def create_table_game(game_params, players)
+      payload = {
+        title: game_params[:title],
+        players: players,
+        description: game_params[:description],
+        optional_rules: game_params[:optional_rules] || [],
+      }
+      payload[:seed] = game_params[:seed] if game_params[:seed] && !game_params[:seed].to_s.strip.empty?
+      @connection.safe_post('/game/table', payload) do |data|
+        # Drop the create page's ?title=... so it isn't carried to the game.
+        `window.history.replaceState(window.history.state, null, window.location.pathname)`
+        enter_game(data)
+      end
     end
 
     def params
@@ -533,7 +575,7 @@ module View
     def filtered_rule?(rule)
       rule[:hidden] ||
         (rule[:players] &&
-        !((@mode == :hotseat || rule[:players].include?(@min_players)) && rule[:players].include?(@max_players)))
+        !((named_players? || rule[:players].include?(@min_players)) && rule[:players].include?(@max_players)))
     end
 
     def update_inputs(title_change: false)

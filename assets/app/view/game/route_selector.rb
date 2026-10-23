@@ -344,7 +344,7 @@ module View
           h('button.small', { attrs: { id: 'clearall' }, on: { click: clear_all } }, 'Clear All'),
           h('button.small', { on: { click: reset_all } }, 'Reset'),
         ]
-        if @game_data.dig('settings', 'auto_routing') || @game_data['mode'] == :hotseat
+        if @game_data.dig('settings', 'auto_routing') || @game_data['mode'] == :hotseat || Lib::TableMode.on?
           buttons << if @autorouter_running
                        h('button.small', { attrs: { id: 'autoroute' }, on: { click: auto_stop } }, 'Stop Auto')
                      else
