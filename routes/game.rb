@@ -129,7 +129,18 @@ class Api
 
                 game.save
               else
-                engine = Engine::Game.load(game, actions: actions_h(game))
+                stored = actions_h(game)
+                # Each move says which move number it expects to be. If another
+                # device's move got in first, this one was made against an older
+                # game, so refuse it rather than apply it to a different
+                # decision (two "pass" presses would otherwise pass twice).
+                # Chat doesn't depend on the game state.
+                sent_id = r.params['id']
+                if r.params['type'] != 'message' && sent_id && sent_id.to_i != stored.size + 1
+                  halt(400, 'Another device made a move first, so this move was not made')
+                end
+
+                engine = Engine::Game.load(game, actions: stored)
                 prev = acting_users(engine, users)
 
                 r.params['user'] = credited_user_id(engine, r.params, user)

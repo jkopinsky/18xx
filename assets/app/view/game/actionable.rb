@@ -155,7 +155,7 @@ module View
           end
           @connection.post(GameManager.url(@game_data, '/action'), json) do |data|
             if (error = data['error'])
-              store(:flash_opts, "The server did not accept this action due to: #{error}... refreshing.")
+              store(:flash_opts, "The server did not accept this action due to: #{error}. Refreshing...")
               `setTimeout(function() { location.reload() }, 5000)`
             end
           end
