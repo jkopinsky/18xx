@@ -303,7 +303,7 @@ module Engine
             'choice' => 'move',
             'reason' => "It is still #{current.name}'s turn, and #{actor_name}'s turn comes later. " \
                         "#{current.name} has a decision here#{step_note} that it did not have in the original " \
-                        "game. Make it, and #{actor_name}'s recorded #{action_words} is tried again " \
+                        "game. Make it, and #{actor_name}'s recorded #{action_noun} is tried again " \
                         "afterwards. Don't skip it.",
           }
         when :over
@@ -320,7 +320,7 @@ module Engine
             {
               'choice' => 'skip',
               'reason' => "#{actor_name}'s turn is already over (it is #{current.name}'s turn now), " \
-                          "so this #{action_words} can no longer happen. Skip it, then check the " \
+                          "so this #{action_noun} can no longer happen. Skip it, then check the " \
                           'preview, since it moved money or shares in the original game.',
             }
           end
@@ -332,7 +332,7 @@ module Engine
             'choice' => 'move',
             'reason' => "It is #{current.name}'s turn now, not #{actor_name}'s: after the change the order of " \
                         "play is different. Make #{current.name}'s move#{step_note}; #{actor_name}'s recorded " \
-                        "#{action_words} is tried again afterwards. Only if #{actor_name} can no longer act in " \
+                        "#{action_noun} is tried again afterwards. Only if #{actor_name} can no longer act in " \
                         'this round at all, skip it and check the preview.',
           }
         end
@@ -354,7 +354,7 @@ module Engine
         alternative = ids.empty? ? '' : " or #{action_words} #{ids} instead (the same company and size)"
         {
           'choice' => 'skip',
-          'reason' => "Skip it if this #{action_words} no longer makes sense (for example it closed a short that " \
+          'reason' => "Skip it if this #{action_noun} no longer makes sense (for example it closed a short that " \
                       "is now closed earlier),#{alternative}. Then check the preview.",
           'equivalent' => @equivalent,
         }
@@ -381,12 +381,45 @@ module Engine
           nil
         end
         at = step ? " (the game is at \"#{step}\")" : ''
+
+        # The recorded action belongs to a later step of this turn (its routes
+        # were removed, so the turn is back at Run Routes before the recorded
+        # dividend): the table makes the earlier decision first.
+        if later_step_in_turn?
+          return {
+            'choice' => 'move',
+            'reason' => "#{actor_name}'s turn now has a step to do first#{at}, before it can " \
+                        "#{action_words}. Make that move; the recorded #{action_noun} is tried again " \
+                        "afterwards. Don't skip it.",
+          }
+        end
+
         {
           'choice' => 'skip',
           'reason' => "#{actor_name} is past the point in its turn where it could #{action_words}#{at}, " \
                       'so this recorded action can no longer happen. Skip it, then check the preview, ' \
                       'since it may have moved money or shares in the original game.',
         }
+      end
+
+      # Whether the step that handled the recorded action comes after the
+      # step the game is at now, in this same round.
+      def later_step_in_turn?
+        round = @game.round
+        current = round.active_step
+        return false unless current
+
+        now = round.steps.index(current)
+        if @recorded_step && Retcon.recorded_round(@game, @recorded_step) == :current
+          was = @recorded_step[2] if @recorded_step[2] && round.steps[@recorded_step[2]].instance_of?(@recorded_step[1])
+          was ||= round.steps.index { |s| s.instance_of?(@recorded_step[1]) }
+          return !was.nil? && was > now
+        end
+
+        # No note to go on: look for a later step that takes this kind of action.
+        round.steps.each_with_index.any? do |s, i|
+          i > now && s.class.const_defined?(:ACTIONS) && s.class::ACTIONS.include?(@broken_action['type'])
+        end
       end
 
       HOUSEKEEPING_ACTIONS = %w[end_game log message undo redo].freeze
@@ -412,8 +445,54 @@ module Engine
         entity&.name || @broken_action['entity'].to_s
       end
 
+      # How an action reads in a sentence: "buy a train", "pay dividends".
+      ACTION_WORDS = {
+        'dividend' => 'pay or withhold dividends',
+        'run_routes' => 'run routes',
+        'lay_tile' => 'lay a tile',
+        'place_token' => 'place a token',
+        'buy_train' => 'buy a train',
+        'buy_shares' => 'buy shares',
+        'sell_shares' => 'sell shares',
+        'buy_company' => 'buy a company',
+        'take_loan' => 'take a loan',
+        'payoff_loan' => 'pay off a loan',
+        'par' => 'start a company',
+        'bid' => 'bid',
+        'pass' => 'pass',
+        'short' => 'short a share',
+      }.freeze
+
+      # The same, as a thing: "train purchase", "dividend".
+      ACTION_NOUNS = {
+        'dividend' => 'dividend',
+        'run_routes' => 'route run',
+        'lay_tile' => 'tile lay',
+        'place_token' => 'token placement',
+        'buy_train' => 'train purchase',
+        'buy_shares' => 'share purchase',
+        'sell_shares' => 'share sale',
+        'buy_company' => 'company purchase',
+        'take_loan' => 'loan',
+        'payoff_loan' => 'loan payoff',
+        'par' => 'company start',
+        'bid' => 'bid',
+        'pass' => 'pass',
+        'short' => 'short',
+      }.freeze
+
       def action_words
-        @broken_action ? @broken_action['type'].to_s.tr('_', ' ') : 'act'
+        return 'act' unless @broken_action
+
+        type = @broken_action['type'].to_s
+        ACTION_WORDS[type] || type.tr('_', ' ')
+      end
+
+      def action_noun
+        return 'action' unless @broken_action
+
+        type = @broken_action['type'].to_s
+        ACTION_NOUNS[type] || type.tr('_', ' ')
       end
 
       # Who should act at the broken point, and which action types the rules

@@ -191,6 +191,25 @@ module Engine
       end
     end
 
+    describe 'a removed step earlier in the same turn, in 1844 160062' do
+      # Without SCB's route run (264), its recorded dividend is reached while
+      # SCB is back at Run Routes. The dividend is still to come in the turn,
+      # so the table is asked for the routes first, not told to skip it.
+      it 'asks for the earlier step instead of suggesting the later action be skipped' do
+        data = Engine.retcon_fixture('1844', '160062')
+        session = Retcon::Session.new(data)
+        gone = session.actions.find { |a| a['id'] == 264 }
+        expect(gone.values_at('type', 'entity')).to eq(%w[run_routes SCB])
+
+        result = session.delete(264).replay
+        expect(result.broken_action.values_at('type', 'entity')).to eq(%w[dividend SCB])
+        expect(result.suggestion['choice']).to eq('move')
+        expect(result.suggestion['reason']).to include("Don't skip it")
+        expect(result.error_message).to include('can no longer pay or withhold dividends')
+        expect(session.resolve_mode({ 'entity' => 'SCB', 'entity_type' => 'corporation' })).to eq(:insert)
+      end
+    end
+
     describe 'a step used twice in one turn, in 1844 160062' do
       let(:data) { Engine.retcon_fixture('1844', '160062') }
 
