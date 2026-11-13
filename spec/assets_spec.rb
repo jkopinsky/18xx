@@ -389,6 +389,38 @@ describe 'Assets' do
       expect(render(app_route: '/game/1#auto', **needs)).to include('Auto Actions')
     end
 
+    it 'renders every game tab on a table server (1844)' do
+      needs = {
+        table_mode: true,
+        game_data: {
+          id: 1,
+          user: { id: 9, name: 'Table' },
+          players: [{ id: 1, name: 'Ann' }, { id: 2, name: 'Ben' }, { id: 3, name: 'Cat' }],
+          title: '1844',
+          actions: [],
+          loaded: true,
+        },
+        user: { id: 9, name: 'Table', settings: { consent: true } },
+      }
+
+      expect(render(app_route: '/game/1#tools', **needs))
+        .to include('Clone Game', 'every device can move for anyone')
+      {
+        'entities' => 'Ann',
+        'map' => 'id="app"',
+        'market' => 'The Bank',
+        'info' => 'Game Phases',
+        'tiles' => 'id="app"',
+        'spreadsheet' => 'Value',
+        'ledger' => 'Ledger',
+        'holdings' => 'Share prices',
+        'fix' => 'Pick the action to fix',
+        'auto' => 'Auto Actions',
+      }.each do |tab, text|
+        expect(render(app_route: "/game/1##{tab}", **needs)).to include(text)
+      end
+    end
+
     def render_game_at_action(data, action_count, string, suffix = '')
       data['actions'] = data['actions'].take(action_count) if action_count
       data[:loaded] = true

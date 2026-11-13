@@ -39,7 +39,7 @@ module View
 
       def master_mode
         if Lib::TableMode.on?
-          return h('div.margined', h(:label, 'At this table every device can move for anyone; no master mode needed.'))
+          return h('div.margined', [h(:label, 'At this table every device can move for anyone; no master mode needed.')])
         end
 
         mode = @settings[:master_mode] || false
