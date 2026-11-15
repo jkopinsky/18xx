@@ -17,6 +17,15 @@ module Engine
         GAME_INFO_URL = 'https://github.com/tobymao/18xx/wiki/1844'
 
         PLAYER_RANGE = [3, 7].freeze
+
+        OPTIONAL_RULES = [
+          {
+            sym: :gb_destination_p4,
+            short_name: 'House rule: GB destination with the Furka-Oberalp tile',
+            desc: 'Not in the published rules. GB (V5) receives its destination bonus when the P4 '\
+                  'Furka-Oberalp special tile is laid, instead of when the Gotthard tunnel is built.',
+          },
+        ].freeze
       end
     end
   end

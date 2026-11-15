@@ -45,6 +45,10 @@ table_down :
 table_import :
 	$(TABLE_COMPOSE) exec rack bundle exec ruby scripts/import_table_game.rb $(FILE)
 
+# make table_rule GAME=12 RULE=gb_destination_p4   (add OFF=1 to turn it off)
+table_rule :
+	$(TABLE_COMPOSE) exec rack bundle exec ruby scripts/table_rule.rb $(GAME) $(RULE) $(if $(OFF),--off,)
+
 # prod config, run locally
 prod_build : prod_link data_dir ensure_prod_env
 	$(CONTAINER_COMPOSE) build

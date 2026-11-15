@@ -746,6 +746,28 @@ module Engine
 
           @log << "#{company.name} closes"
           company.close!
+          gb_destination_with_p4!
+        end
+
+        # House rule (optional rule :gb_destination_p4): the Furka-Oberalp tile
+        # counts as GB's destination instead of the Gotthard tunnel. Paid as
+        # part of laying the tile, so a game already past that point gets it
+        # when the rule is switched on and the game is reloaded.
+        def gb_destination_p4?
+          @optional_rules&.include?(:gb_destination_p4)
+        end
+
+        def gb_destination_with_p4!
+          return unless gb_destination_p4?
+
+          corporation = gb
+          return if !corporation || corporation.closed?
+          # Paid later, at its next destination check, if GB hasn't started yet.
+          return unless corporation.floated?
+          return unless hex_by_id(corporation.destination_coordinates).assigned?(corporation)
+
+          @log << "House rule: the Furka-Oberalp tile counts as #{corporation.name}'s destination"
+          destinated!(corporation)
         end
 
         def assign_p7_train(corporation)
@@ -771,7 +793,7 @@ module Engine
           destination_hex = hex_by_id(entity.destination_coordinates)
           return false if !home_node || !destination_hex
           return false unless destination_hex.assigned?(entity)
-          return hex_by_id('H19').tile.paths.any? { |path| path.track == :narrow } if entity == gb
+          return gb_destinated? if entity == gb
 
           home_node.walk(corporation: entity) do |path, _|
             return true if destination_hex == path.hex
@@ -780,7 +802,17 @@ module Engine
           false
         end
 
+        def gb_destinated?
+          # With the house rule, the Furka-Oberalp tile counts instead of the tunnel.
+          return p4.closed? && hex_by_id('H19').tile.name == P4_TILE_LAYS['H19'] if gb_destination_p4?
+
+          hex_by_id('H19').tile.paths.any? { |path| path.track == :narrow }
+        end
+
         def destinated!(corporation)
+          # Paid once only (the GB house rule can pay before a recorded tunnel bonus).
+          return unless hex_by_id(corporation.destination_coordinates).assigned?(corporation)
+
           remove_destination_token!(corporation)
           multiplier = corporation.type == :historical ? 5 : 2
           amount = corporation.par_price.price * multiplier

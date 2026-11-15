@@ -154,3 +154,16 @@ make table_up
 - **Other devices can't connect:** check they are on the same Wi-Fi, that you
   used the laptop's address (not `localhost`), and that the firewall allows the
   connection.
+
+## House rules for a game already in progress
+
+Optional rules (including house rules such as 1844's
+`gb_destination_p4`, "GB destination with the Furka-Oberalp tile") can be
+switched on for a game that has already started:
+
+    make table_rule GAME=<game id> RULE=gb_destination_p4
+
+Add `OFF=1` to switch it off again. The script replays the whole game with
+the change first and leaves the game alone if any recorded move would break.
+Reload the game page on every device afterwards. New games can pick the rule
+when they are created.
