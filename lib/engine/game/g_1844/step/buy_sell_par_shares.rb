@@ -48,6 +48,8 @@ module Engine
 
             companies_of_type = []
             if @game.mountain_railways.include?(company)
+              return true if @game.optional_rules.include?(:multiple_mountain_railways)
+
               companies_of_type = @game.mountain_railways
             elsif @game.tunnel_companies.include?(company)
               companies_of_type = @game.tunnel_companies

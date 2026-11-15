@@ -25,6 +25,13 @@ module Engine
             desc: 'Not in the published rules. GB (V5) receives its destination bonus when the P4 '\
                   'Furka-Oberalp special tile is laid, instead of when the Gotthard tunnel is built.',
           },
+          {
+            sym: :multiple_mountain_railways,
+            short_name: 'House rule: several Mountain Railways per stock round',
+            desc: 'Not in the published rules. A player may buy more than one Mountain Railway in the same '\
+                  "stock round (each purchase is still that turn's buy). Tunnel companies keep the "\
+                  'one-per-round limit.',
+          },
         ].freeze
       end
     end

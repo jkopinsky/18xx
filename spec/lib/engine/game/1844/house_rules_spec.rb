@@ -53,4 +53,35 @@ module Engine
       expect(game.destinated?(game.corporation_by_id('GB'))).to eq(false)
     end
   end
+
+  describe 'G1844 house rule: several Mountain Railways per stock round' do
+    let(:data) { JSON.parse(File.read(File.join(__dir__, '..', '..', '..', '..', 'fixtures', '1844', '160062.json'))) }
+
+    # Player 4 buys B1 at action 228; action 235 is their next turn in the same stock round.
+    def second_mountain_turn(rules)
+      d = JSON.parse(JSON.generate(data))
+      d['settings'] = (d['settings'] || {}).merge('optional_rules' => rules)
+      game = Game.load(d, actions: d['actions'].first(235))
+      player = game.player_by_id(2798)
+      game.bank.spend(500, player)
+      [game, player]
+    end
+
+    it 'keeps the one-per-round limit without the house rule' do
+      game, player = second_mountain_turn([])
+      expect(game.round.active_step.current_entity).to eq(player)
+      expect(game.round.active_step.can_buy_company?(player, game.company_by_id('B3'))).to eq(false)
+    end
+
+    it 'allows a second Mountain Railway in the same stock round with the house rule' do
+      game, player = second_mountain_turn(['multiple_mountain_railways'])
+      b3 = game.company_by_id('B3')
+      expect(game.round.active_step.can_buy_company?(player, b3)).to eq(true)
+
+      game.process_action(Action::BuyCompany.new(player, company: b3, price: 150))
+      expect(game.exception).to be_nil
+      expect(player.companies).to include(b3)
+      expect(game.round.active_entities).to eq([b3]) # places its revenue marker next
+    end
+  end
 end

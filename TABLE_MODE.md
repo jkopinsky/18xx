@@ -159,7 +159,8 @@ make table_up
 
 Optional rules (including house rules such as 1844's
 `gb_destination_p4`, "GB destination with the Furka-Oberalp tile") can be
-switched on for a game that has already started:
+switched on for a game that has already started (1844 also has
+`multiple_mountain_railways`, several Mountain Railways per stock round):
 
     make table_rule GAME=<game id> RULE=gb_destination_p4
 
