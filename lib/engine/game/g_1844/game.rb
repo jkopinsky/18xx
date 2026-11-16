@@ -293,9 +293,36 @@ module Engine
         end
 
         def game_trains
-          return super unless @optional_rules&.include?(:three_trains_rust_phase5)
+          trains = super
+          if @optional_rules&.include?(:three_trains_rust_phase5)
+            trains = trains.map { |train| train[:name] == '3' ? train.merge(rusts_on: '5') : train }
+          end
+          trains = privates_close_on_six(trains) if privates_close_phase6?
+          trains
+        end
 
-          super.map { |train| train[:name] == '3' ? train.merge(rusts_on: '5') : train }
+        def game_phases
+          return super unless privates_close_phase6?
+
+          super.map do |phase|
+            phase[:name] == '5' ? phase.merge(status: Array(phase[:status]) | %w[can_buy_companies]) : phase
+          end
+        end
+
+        def privates_close_phase6?
+          @optional_rules&.include?(:privates_close_phase6)
+        end
+
+        # Moves the "private companies close" event from the first 5 train to the first 6.
+        def privates_close_on_six(trains)
+          trains.map do |train|
+            events = train[:events] || []
+            case train[:name]
+            when '5' then train.merge(events: events.reject { |e| e['type'] == 'close_companies' })
+            when '6' then train.merge(events: [{ 'type' => 'close_companies' }, *events])
+            else train
+            end
+          end
         end
 
         def p4
@@ -731,7 +758,7 @@ module Engine
           owner = company.owner
           compensation = 80
 
-          @log << "#{owner.name} must use #{company.name}" if @phase.name.to_i >= 5
+          @log << "#{owner.name} must use #{company.name}" if @phase.name.to_i >= (privates_close_phase6? ? 6 : 5)
           @log << "#{owner.name} (#{company.name}) lays Furka-Oberalp special tile"
           @log << "#{owner.name} receives #{format_currency(compensation)}"
 

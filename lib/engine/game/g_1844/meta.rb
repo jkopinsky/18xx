@@ -38,6 +38,13 @@ module Engine
             desc: 'Not in the published rules. 3 and 3H trains rust when the first 5 (or 5H) train is bought, '\
                   'instead of the first 6.',
           },
+          {
+            sym: :privates_close_phase6,
+            short_name: 'House rule: private companies close in phase 6',
+            desc: 'Not in the published rules. Private companies close when the first 6 (or 6H) train is bought '\
+                  'instead of the first 5, and corporations may still buy them in phase 5. P7 still gives EVA '\
+                  'from phase 5.',
+          },
         ].freeze
       end
     end

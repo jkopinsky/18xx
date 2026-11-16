@@ -161,7 +161,8 @@ Optional rules (including house rules such as 1844's
 `gb_destination_p4`, "GB destination with the Furka-Oberalp tile") can be
 switched on for a game that has already started (1844 also has
 `multiple_mountain_railways`, several Mountain Railways per stock round, and
-`three_trains_rust_phase5`, 3 and 3H trains rust at the first 5 train):
+`three_trains_rust_phase5`, 3 and 3H trains rust at the first 5 train, and
+`privates_close_phase6`, private companies close at the first 6 train):
 
     make table_rule GAME=<game id> RULE=gb_destination_p4
 

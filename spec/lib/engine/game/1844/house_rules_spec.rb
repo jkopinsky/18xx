@@ -127,4 +127,45 @@ module Engine
       expect(result.error_message).to be_a(String)
     end
   end
+
+  describe 'G1844 house rule: private companies close in phase 6' do
+    let(:data) { JSON.parse(File.read(File.join(__dir__, '..', '..', '..', '..', 'fixtures', '1844', '160062.json'))) }
+    let(:first_five) { data['actions'].index { |a| a['type'] == 'buy_train' && a['variant'].to_s.start_with?('5') } }
+
+    def after_first_five(rules)
+      d = JSON.parse(JSON.generate(data))
+      d['settings'] = (d['settings'] || {}).merge('optional_rules' => rules)
+      game = Game.load(d, actions: d['actions'].first(first_five + 1))
+      expect(game.exception).to be_nil
+      game
+    end
+
+    def open_privates(game)
+      game.companies.select { |c| c.sym.start_with?('P') && !c.closed? }.map(&:sym)
+    end
+
+    it 'closes them at the first 5 without the house rule' do
+      game = after_first_five([])
+      expect(open_privates(game)).to eq(['P7'])
+      expect(game.phase.status).not_to include('can_buy_companies')
+    end
+
+    it 'keeps them open, and for sale to corporations, through phase 5' do
+      game = after_first_five(['privates_close_phase6'])
+      expect(game.phase.name).to eq('5')
+      expect(open_privates(game)).to include('P1', 'P2', 'P3', 'P5')
+      expect(game.phase.status).to include('can_buy_companies')
+    end
+
+    it 'closes them when the first 6 train is bought' do
+      game = after_first_five(['privates_close_phase6'])
+      six = game.depot.upcoming.find { |t| t.sym == '6' }
+      five = game.trains.find { |t| t.sym == '5' }
+      expect(six.events.map { |e| e['type'] }).to include('close_companies')
+      expect(five.events.map { |e| e['type'] }).not_to include('close_companies')
+
+      Ledger.with(game.ledger) { game.event_close_companies! }
+      expect(open_privates(game)).to eq(['P7'])
+    end
+  end
 end
