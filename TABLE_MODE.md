@@ -160,11 +160,16 @@ make table_up
 Optional rules (including house rules such as 1844's
 `gb_destination_p4`, "GB destination with the Furka-Oberalp tile") can be
 switched on for a game that has already started (1844 also has
-`multiple_mountain_railways`, several Mountain Railways per stock round):
+`multiple_mountain_railways`, several Mountain Railways per stock round, and
+`three_trains_rust_phase5`, 3 and 3H trains rust at the first 5 train):
 
     make table_rule GAME=<game id> RULE=gb_destination_p4
 
 Add `OFF=1` to switch it off again. The script replays the whole game with
 the change first and leaves the game alone if any recorded move would break.
+To change it anyway, add `ANYWAY=1`: the game then stops at the first move
+that no longer works, and the Fix history tab offers "Repair from action N",
+which replays from there and asks the table for a new move wherever a
+recorded one no longer fits.
 Reload the game page on every device afterwards. New games can pick the rule
 when they are created.

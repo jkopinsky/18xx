@@ -80,6 +80,13 @@ module Lib
       @status = :move
     end
 
+    # Replays from the action where the live game stops, asking for moves
+    # wherever the recorded ones no longer work.
+    def repair(id, description)
+      @last_edit = "Repairing from action #{id}: #{description}"
+      apply(@session.replay_from(id))
+    end
+
     def insert_before(id, description)
       @last_edit = "Inserting a move before action #{id}: #{description}"
       @display_game = @session.open_slot(id, :insert)

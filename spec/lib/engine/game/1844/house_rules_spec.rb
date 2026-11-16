@@ -84,4 +84,47 @@ module Engine
       expect(game.round.active_entities).to eq([b3]) # places its revenue marker next
     end
   end
+
+  describe 'G1844 house rule: 3 and 3H trains rust in phase 5' do
+    let(:data) { JSON.parse(File.read(File.join(__dir__, '..', '..', '..', '..', 'fixtures', '1844', '160062.json'))) }
+    let(:first_five) { data['actions'].index { |a| a['type'] == 'buy_train' && a['variant'].to_s.start_with?('5') } }
+
+    def three_trains_after_first_five(rules)
+      d = JSON.parse(JSON.generate(data))
+      d['settings'] = (d['settings'] || {}).merge('optional_rules' => rules)
+      game = Game.load(d, actions: d['actions'].first(first_five + 1))
+      expect(game.exception).to be_nil
+      expect(game.phase.name).to eq('5')
+      game.trains.select { |t| t.sym == '3' && t.owner && t.owner != game.depot && !t.rusted }
+    end
+
+    it 'keeps the 3H trains in phase 5 without the house rule' do
+      expect(three_trains_after_first_five([])).not_to be_empty
+    end
+
+    it 'rusts every 3H train when the first 5 train is bought' do
+      expect(three_trains_after_first_five(['three_trains_rust_phase5'])).to be_empty
+    end
+  end
+
+  describe 'Fix history after switching on a house rule part way through' do
+    let(:data) { JSON.parse(File.read(File.join(__dir__, '..', '..', '..', '..', 'fixtures', '1844', '160062.json'))) }
+
+    it 'replays from where the live game stops and asks about the first move that no longer works' do
+      d = JSON.parse(JSON.generate(data))
+      d['settings'] = (d['settings'] || {}).merge('optional_rules' => ['three_trains_rust_phase5'],
+                                                  'recorded_optional_rules' => [])
+      live = Game.load(d)
+      expect(live.exception).not_to be_nil
+      stop = live.broken_action&.id || live.last_processed_action
+
+      session = Retcon::Session.new(d, original_game: live)
+      result = session.replay_from(stop)
+      expect(result).to be_broken
+      # The recorded moves were tagged under the rules they were played with.
+      expect(session.actions.size).to eq(Retcon.flatten(d['actions']).size)
+      expect(session.broken_recorded_action['id']).to be >= stop
+      expect(result.error_message).to be_a(String)
+    end
+  end
 end

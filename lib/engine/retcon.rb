@@ -587,11 +587,41 @@ module Engine
         Engine::Game.load(@data, actions: actions.map { |a| Retcon.untag(a) })
       end
 
+      # The game as recorded, used to tell which step made each recorded action.
+      # If the live game no longer replays because a rule was changed part way
+      # through (scripts/table_rule.rb), the history is read under the rules it
+      # was played with.
       def original_game
-        return @original_game if @original_game
+        return @original_game if @tag_game_ready
 
-        @original_ids_flat = true
-        @original_game = load(@original_actions)
+        @tag_game_ready = true
+        unless @original_game
+          @original_ids_flat = true
+          @original_game = load(@original_actions)
+        end
+        if @original_game.exception && (recorded = recorded_rules_game)
+          @original_ids_flat = true
+          @original_game = recorded
+        end
+        @original_game
+      end
+
+      # Replays from a recorded action without changing anything, stopping at
+      # the first action that no longer works (after a rule change, say).
+      def replay_from(id)
+        tag_steps!
+        mark_dirty(index_of(id))
+        replay
+      end
+
+      def recorded_rules_game
+        settings = @data['settings'] || {}
+        rules = settings['recorded_optional_rules']
+        return unless rules
+
+        data = @data.merge('settings' => settings.merge('optional_rules' => rules))
+        game = Engine::Game.load(data, actions: @original_actions.map { |a| Retcon.untag(a) })
+        game.exception ? nil : game
       end
 
       def index_of(id)

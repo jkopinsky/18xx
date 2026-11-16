@@ -59,6 +59,7 @@ module View
         end
 
         h(:div, [
+          render_broken_live_game(state, actions, log_by_id),
           h(:p, [
             'Pick the action to fix. Nothing changes in the live game until you commit. ',
             'After an edit, the rest of the game replays under the rules; if a later action no longer works ',
@@ -68,6 +69,27 @@ module View
             h(:thead, [h(:tr, ['#', 'What happened', 'Fix'].map { |t| h(:th, { style: cell }, t) })]),
             h(:tbody, trs),
           ]),
+        ])
+      end
+
+      # When the live game no longer replays (say a rule was changed part way
+      # through), offer to start the fix at the action that stopped it.
+      def render_broken_live_game(state, actions, log_by_id)
+        return nil unless @game.exception
+
+        broken_id = @game.broken_action&.id || @game.last_processed_action
+        index = broken_id && actions.index { |a| a['id'] == broken_id }
+        return nil unless index
+
+        action = actions[index]
+        lines = log_by_id[state.session.source_ids[index]] || []
+        description = lines.empty? ? describe(action) : lines.join(' · ')
+        h('div.margined', { style: { border: '1px solid #c00', padding: '0.5rem', marginBottom: '1rem' } }, [
+          h(:p, { style: { margin: '0 0 0.5rem' } },
+            "The game stops at action #{broken_id} (#{description}): #{@game.exception.message.sub(/ at\s*\z/, '')}. "\
+            'Repair replays the game from there and asks for a new move wherever a recorded one no '\
+            'longer works.'),
+          button("Repair from action #{broken_id}", -> { begin_retcon(state) { state.repair(broken_id, description) } }),
         ])
       end
 

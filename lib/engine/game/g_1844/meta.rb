@@ -32,6 +32,12 @@ module Engine
                   "stock round (each purchase is still that turn's buy). Tunnel companies keep the "\
                   'one-per-round limit.',
           },
+          {
+            sym: :three_trains_rust_phase5,
+            short_name: 'House rule: 3 and 3H trains rust in phase 5',
+            desc: 'Not in the published rules. 3 and 3H trains rust when the first 5 (or 5H) train is bought, '\
+                  'instead of the first 6.',
+          },
         ].freeze
       end
     end

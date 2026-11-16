@@ -292,6 +292,12 @@ module Engine
           @gb ||= corporation_by_id('GB')
         end
 
+        def game_trains
+          return super unless @optional_rules&.include?(:three_trains_rust_phase5)
+
+          super.map { |train| train[:name] == '3' ? train.merge(rusts_on: '5') : train }
+        end
+
         def p4
           @p4 ||= company_by_id('P4')
         end
