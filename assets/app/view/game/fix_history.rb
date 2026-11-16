@@ -69,7 +69,7 @@ module View
             h(:thead, [h(:tr, ['#', 'What happened', 'Fix'].map { |t| h(:th, { style: cell }, t) })]),
             h(:tbody, trs),
           ]),
-        ])
+        ].compact)
       end
 
       # When the live game no longer replays (say a rule was changed part way
