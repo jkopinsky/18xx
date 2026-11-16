@@ -126,6 +126,28 @@ module Engine
       expect(session.broken_recorded_action['id']).to be >= stop
       expect(result.error_message).to be_a(String)
     end
+
+    it 'finds the stopping action when the history has undos and chat in it' do
+      d = JSON.parse(JSON.generate(data))
+      acts = d['actions']
+      a = acts[99]
+      extra = [{ 'type' => 'undo', 'entity' => a['entity'], 'entity_type' => a['entity_type'] },
+               { 'type' => 'redo', 'entity' => a['entity'], 'entity_type' => a['entity_type'] },
+               { 'type' => 'message', 'entity' => 2363, 'entity_type' => 'player', 'message' => 'hi' }]
+      acts = acts[0..99] + extra + acts[100..]
+      acts.each_with_index { |x, i| x['id'] = i + 1 }
+      d['actions'] = acts
+      d['settings'] = (d['settings'] || {}).merge('optional_rules' => ['three_trains_rust_phase5'],
+                                                  'recorded_optional_rules' => [])
+      live = Game.load(d)
+      stored_id = live.broken_action&.id || live.last_processed_action
+
+      session = Retcon::Session.new(d, original_game: live)
+      index = session.source_ids.index(stored_id)
+      expect(index).not_to be_nil
+      expect(session.actions[index]['id']).not_to eq(stored_id) # numbered differently
+      expect(session.replay_from(session.actions[index]['id'])).to be_broken
+    end
   end
 
   describe 'G1844 house rule: private companies close in phase 6' do

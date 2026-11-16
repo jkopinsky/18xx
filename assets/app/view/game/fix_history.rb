@@ -77,11 +77,14 @@ module View
       def render_broken_live_game(state, actions, log_by_id)
         return nil unless @game.exception
 
+        # The live game numbers actions as stored (undos, chat and all); the fix
+        # works on the flattened list, so map one to the other.
         broken_id = @game.broken_action&.id || @game.last_processed_action
-        index = broken_id && actions.index { |a| a['id'] == broken_id }
+        index = broken_id && state.session.source_ids.index(broken_id)
         return nil unless index
 
         action = actions[index]
+        flat_id = action['id']
         lines = log_by_id[state.session.source_ids[index]] || []
         description = lines.empty? ? describe(action) : lines.join(' · ')
         h('div.margined', { style: { border: '1px solid #c00', padding: '0.5rem', marginBottom: '1rem' } }, [
@@ -89,7 +92,7 @@ module View
             "The game stops at action #{broken_id} (#{description}): #{@game.exception.message.sub(/ at\s*\z/, '')}. "\
             'Repair replays the game from there and asks for a new move wherever a recorded one no '\
             'longer works.'),
-          button("Repair from action #{broken_id}", -> { begin_retcon(state) { state.repair(broken_id, description) } }),
+          button("Repair from action #{broken_id}", -> { begin_retcon(state) { state.repair(flat_id, description) } }),
         ])
       end
 
